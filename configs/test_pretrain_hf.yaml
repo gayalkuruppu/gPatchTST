@@ -1,0 +1,36 @@
+data:
+  root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_npy_test'
+  data_path: ''
+  batch_size: 128
+  num_workers: 4
+  n_vars: 19
+
+model:
+  target_dim: 0
+  patch_length: 100
+  stride: 100
+  num_patch: 10
+  num_layers: 6
+  d_model: 128
+  num_heads: 4
+  shared_embedding: True
+  d_ff: 2048
+  norm: 'batchnorm'
+  attn_dropout: 0.0
+  dropout: 0.0
+  activation: 'gelu'
+  res_attention: False
+  pe: 'sincos' # options: 'random' and 'sincos'
+  learn_pe: True # no such option ->
+  head_dropout: 0.0
+  head_type: 'pretrain'
+  
+  revin: True # is revin used? how?
+  revin_eps: 1e-5
+  revin_affine: True
+
+train:
+  num_epochs: 100
+  learning_rate: 0.0001
+  weight_decay: 0.0
+  scheduler: 'cosine'

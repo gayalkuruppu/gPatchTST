@@ -1,0 +1,20 @@
+# Environment files
+
+
+# IDE and editor files
+.vscode/
+
+# Python cache
+__pycache__/
+
+# Neptune files
+.neptune/
+
+# Saved models
+saved_models/
+
+# temporary files
+debug_train.png
+debug_val.png
+tuhab_patient_metadata.csv
+check_status.ipynb

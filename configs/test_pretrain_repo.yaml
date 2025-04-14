@@ -1,0 +1,51 @@
+data:
+  root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_test_normal_only'
+  data_path: ''
+  csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_test_normal_only/file_lengths_map.csv'
+  batch_size: 256
+  num_workers: 8
+  n_vars: 19
+
+model:
+  seq_len: 1000
+  target_dim: 0
+  patch_length: 100
+  stride: 100
+  num_layers: 6
+  d_model: 128
+  num_heads: 16
+  shared_embedding: True
+  d_ff: 256
+  norm: 'BatchNorm'
+  attn_dropout: 0.0
+  dropout: 0.2
+  activation: 'relu'
+  res_attention: True
+  pe: 'sincos'
+  learn_pe: True
+  head_dropout: 0.2
+  head_type: 'pretrain'
+  
+  revin: False
+  revin_eps: 1e-5
+  revin_affine: False # denorm False
+
+  mask_ratio: 0.3
+  masked_value: 0.0
+  independent_channel_masking: True
+  forecasting_num_patches: 1
+
+  save_path: 'saved_models/pretrain'
+  checkpoint_interval: 0.1 # num_epochs or percentage
+
+train:
+  num_epochs: 10
+  learning_rate: 1e-4
+  weight_decay: 1e-3
+  scheduler: 'cosine'
+  val_interval_epochs: 5
+
+neptune:
+  enabled: True
+  project: 'gayalkuruppu/tuh-ssl-test'
+  experiment_name: 'just_a_test'
