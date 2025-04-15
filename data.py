@@ -175,7 +175,7 @@ class TUH_Dataset(Dataset):
     
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 
-                   size=None):
+                   prefetch_factor=1, pin_memory=False, drop_last=False, size=None):
     # Create datasets
     train_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='train')
     val_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='val')
@@ -183,10 +183,13 @@ def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_worke
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                              num_workers=num_workers)
+                              num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                            num_workers=num_workers)
+                            num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
-                             num_workers=num_workers)
+                             num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
     
     return train_loader, val_loader, test_loader

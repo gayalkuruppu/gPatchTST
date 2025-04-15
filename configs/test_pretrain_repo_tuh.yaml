@@ -2,8 +2,11 @@ data:
   root_path: '/mnt/ssd_4tb_0/data/tuh_preprocessed'
   data_path: ''
   csv_path: '/mnt/ssd_4tb_0/data/tuh_preprocessed/file_lengths_map.csv'
-  batch_size: 256
+  batch_size: 512
   num_workers: 8
+  prefetch_factor: 4
+  pin_memory: True
+  drop_last: True
   n_vars: 19
 
 model:
@@ -33,17 +36,17 @@ model:
   mask_ratio: 0.3
   masked_value: 0.0
   independent_channel_masking: True
-  forecasting_num_patches: 1
+  forecasting_num_patches: 3
 
   save_path: 'saved_models/pretrain'
-  checkpoint_interval: 0.1 # num_epochs or percentage
+  checkpoint_interval: 0.02 # num_epochs or percentage
 
 train:
-  num_epochs: 50
+  num_epochs: 100
   learning_rate: 1e-4
   weight_decay: 1e-3
   scheduler: 'cosine'
-  val_interval_epochs: 5
+  val_interval_epochs: 1
 
 neptune:
   enabled: True

@@ -7,6 +7,9 @@
 # Python cache
 __pycache__/
 
+# Ipython Notebook checkpoints
+.ipynb_checkpoints/
+
 # Neptune files
 .neptune/
 
@@ -14,7 +17,10 @@ __pycache__/
 saved_models/
 
 # temporary files
+debug_plots/
 debug_train.png
 debug_val.png
 tuhab_patient_metadata.csv
 check_status.ipynb
+dataloading.ipynb
+pretrain_old.py
