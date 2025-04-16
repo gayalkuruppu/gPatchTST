@@ -9,11 +9,12 @@ import pickle
 
 class TUH_Dataset(Dataset):
     def __init__(self, root_path, data_path, csv_path, size=None,
-                 split='train', train_split=0.7, test_split=0.2):
+                 split='train', train_split=0.7, test_split=0.2, seed=42):
         # Initialize parameters
         self.root_path = root_path
         self.data_path = data_path
         self.csv_path = csv_path
+        self.seed = seed
         
         # Split settings
         assert split in ['train', 'test', 'val']
@@ -76,8 +77,8 @@ class TUH_Dataset(Dataset):
             # Create new splits if file doesn't exist
             print(f"Creating new patient splits...")
             
-            # Set fixed random seed for reproducibility
-            random.seed(42)
+            # Set random seed for reproducibility
+            random.seed(self.seed)
             
             # Shuffle patient IDs
             patient_ids = list(patient_files_dic.keys())
@@ -172,14 +173,92 @@ class TUH_Dataset(Dataset):
         
     def __len__(self):
         return self.cumulative_lengths[-1]
-    
+
+
+class TUAB_Dataset(TUH_Dataset):
+    def __init__(self, root_path, data_path, csv_path, metadata_csv_path=None,
+                 size=None, split='train', train_split=0.7, test_split=0.2, seed=42):
+        super().__init__(root_path, data_path, csv_path, size=size,
+                         split=split, train_split=train_split, test_split=test_split, seed=seed)
+        
+        # Load metadata
+        self.metadata = self._read_metadata(metadata_csv_path)
+
+    def _read_metadata(self, metadata_csv_path):
+        """Read metadata from CSV file and return as DataFrame"""
+        if metadata_csv_path:
+            metadata = pd.read_csv(metadata_csv_path)
+        else:
+            metadata = pd.read_csv(os.path.join(self.root_path, self.data_path, 'metadata.csv'))
+
+        metadata.set_index('filename', inplace=True)
+        # Ensure the index is unique
+        assert metadata.index.is_unique, "Index in metadata CSV must be unique"
+        return metadata
+
+    def __getitem__(self, index):
+        # Binary search to find file index more efficiently
+        left, right = 0, len(self.cumulative_lengths) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            if index < self.cumulative_lengths[mid]:
+                if mid == 0 or index >= self.cumulative_lengths[mid-1]:
+                    file_index = mid
+                    break
+                right = mid - 1
+            else:
+                left = mid + 1
+        
+        # Calculate local index in file
+        if file_index > 0:
+            local_index = index - self.cumulative_lengths[file_index - 1]
+        else:
+            local_index = index
+        
+        # Load tensor directly without caching
+        tensor = self._load_tensor(file_index)
+
+        # Extract the sequence
+        seq_x = tensor[local_index*self.seq_len:(local_index+1)*self.seq_len]
+        seq_y = tensor[(local_index+1)*self.seq_len:(local_index+1)*self.seq_len + self.pred_len]
+        
+        filename = self.selected_files[file_index].split('_preprocessed.npy')[0]
+        metadata = self.metadata.loc[filename]
+
+
+        data = {"past_values": seq_x.copy(), 
+                "future_values": seq_y.copy(),
+                "age": metadata['age'],
+                "gender": metadata["gender"],
+                "label": metadata['label']
+                }
+        
+        return data
+    # def __getitem__(self, index):
+    #     item = super().__getitem__(index)
+    #     filename = self.selected_files[index].split('_preprocessed.npy')[0]
+        
+    #     # Get metadata for the file
+    #     metadata = self.metadata.loc[filename]
+        
+    #     # Add metadata to the item
+    #     item['age'] = metadata['age']
+    #     item['gender'] = metadata['gender']
+    #     item['label'] = metadata['label']
+        
+    #     # Convert numpy arrays to PyTorch tensors
+    #     item['past_values'] = torch.from_numpy(item['past_values']).float()
+    #     item['future_values'] = torch.from_numpy(item['future_values']).float()
+        
+    #     return item
+
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 
-                   prefetch_factor=1, pin_memory=False, drop_last=False, size=None):
+                   prefetch_factor=1, pin_memory=False, drop_last=False, size=None, seed=42):
     # Create datasets
-    train_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='train')
-    val_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='val')
-    test_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='test')
+    train_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='train', seed=seed)
+    val_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='val', seed=seed)
+    test_dataset = TUH_Dataset(root_path, data_path, csv_path, size=size, split='test', seed=seed)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
@@ -188,6 +267,31 @@ def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_worke
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, prefetch_factor=prefetch_factor,
                              pin_memory=pin_memory, drop_last=drop_last)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                             num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
+    
+    return train_loader, val_loader, test_loader
+
+
+def get_tuab_dataloaders(root_path, data_path, csv_path, metadata_csv_path=None,
+                        batch_size=64, num_workers=4, prefetch_factor=1, 
+                        pin_memory=False, drop_last=False, size=None, seed=42):
+    # Create datasets
+    train_dataset = TUAB_Dataset(root_path, data_path, csv_path, metadata_csv_path=metadata_csv_path,
+                                 size=size, split='train', seed=seed)
+    val_dataset = TUAB_Dataset(root_path, data_path, csv_path, metadata_csv_path=metadata_csv_path,
+                               size=size, split='val', seed=seed)
+    test_dataset = TUAB_Dataset(root_path, data_path, csv_path, metadata_csv_path=metadata_csv_path,
+                                size=size, split='test', seed=seed)
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, prefetch_factor=prefetch_factor,
+                              pin_memory=pin_memory, drop_last=drop_last)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, prefetch_factor=prefetch_factor,
+                            pin_memory=pin_memory, drop_last=drop_last)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
                              num_workers=num_workers, prefetch_factor=prefetch_factor,
                              pin_memory=pin_memory, drop_last=drop_last)

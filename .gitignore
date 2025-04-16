@@ -18,9 +18,11 @@ saved_models/
 
 # temporary files
 debug_plots/
+eval_plots/
 debug_train.png
 debug_val.png
 tuhab_patient_metadata.csv
+tuhab_patient_metadata_ds.csv
 check_status.ipynb
 dataloading.ipynb
 pretrain_old.py
