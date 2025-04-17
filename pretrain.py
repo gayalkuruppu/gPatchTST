@@ -16,11 +16,16 @@ import argparse
 DEBUG = False
 
 def init_neptune(config):
-
+    """
+    Initialize a new Neptune run.
+    """
+    print("Creating a new Neptune run.")
     return neptune.init_run(
         project=config['neptune']['project'], 
-        name=config['neptune']['experiment_name']
-        )
+        name=config['neptune']['experiment_name'],
+        capture_stdout=False,  # Avoid duplicate logging of stdout
+        capture_stderr=False   # Avoid duplicate logging of stderr
+    )
 
 def create_patches(xb, patch_len, stride):
     """
@@ -174,7 +179,7 @@ def plot_sample_reconstruction(model, revin, sample, mask_ratio, masked_value, m
         
         # Highlight masked regions
         for i in range(len(mask_regions)):
-            if mask_regions[i]:
+            if (mask_regions[i]):
                 start_idx = i * patch_len
                 end_idx = start_idx + patch_len
                 ax.axvspan(start_idx, end_idx, color='yellow', alpha=0.2)
@@ -199,7 +204,7 @@ def plot_sample_reconstruction(model, revin, sample, mask_ratio, masked_value, m
     for ax in axes:
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(tick_labels)
-        ax.tick_params(axis='x', which='both', labelsize=10, labelbottom=True)
+        ax.tick_params(axis='x', which='both', labelsize=10, labelrotation=90, labelbottom=True)
     
     axes[-1].set_xlabel('Timestamps')
 
@@ -294,10 +299,94 @@ def val_step(model, revin, batch, criterion, model_config, device, val_mask_type
     
     return loss.item()
 
+def load_checkpoint(checkpoint_path, model, revin, optimizer, scheduler, device, best_model_path=None):
+    """
+    Load model, optimizer, scheduler, and other states from a checkpoint.
+    Optionally load the best_val_loss from the best_model.pth checkpoint.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    if revin and checkpoint['revin_state_dict']:
+        revin.load_state_dict(checkpoint['revin_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    start_epoch = checkpoint['epoch']
+    best_val_loss = checkpoint.get('val_loss', float('inf'))
+
+    # Load best_val_loss from best_model.pth if provided
+    if best_model_path and os.path.exists(best_model_path):
+        best_model_checkpoint = torch.load(best_model_path, map_location=device)
+        best_val_loss = best_model_checkpoint['val_loss']['random']
+        print(f"Loaded best_val_loss from {best_model_path}: {best_val_loss}")
+
+    print(f"Checkpoint loaded. Resuming from epoch {start_epoch} with best val loss: {best_val_loss}")
+    return start_epoch, best_val_loss
+
+def reinitialize_scheduler(scheduler, optimizer, train_configs, start_epoch, steps_per_epoch):
+    """
+    Reinitialize the OneCycleLR scheduler with the correct total steps when resuming training.
+    """
+    total_steps = train_configs['num_epochs'] * steps_per_epoch
+    completed_steps = start_epoch * steps_per_epoch
+    remaining_steps = total_steps - completed_steps
+
+    if remaining_steps <= 0:
+        raise ValueError("No remaining steps for the scheduler. Check your num_epochs and start_epoch values.")
+
+    return OneCycleLR(
+        optimizer,
+        max_lr=float(train_configs['learning_rate']),
+        total_steps=remaining_steps,
+        pct_start=0.3,  # Default value
+        anneal_strategy='cos',
+        cycle_momentum=True,
+        base_momentum=0.85,
+        max_momentum=0.95,
+        div_factor=25,
+    )
+
+def create_checkpoint(model, revin, optimizer, scheduler, avg_train_loss, avg_val_losses, config, epoch):
+    """
+    Create a checkpoint dictionary with all necessary states.
+    """
+    return {
+        'epoch': epoch + 1,  # Assuming model has an `epoch` attribute
+        'model_state_dict': model.state_dict(),
+        'revin_state_dict': revin.state_dict() if revin else None,
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'train_loss': avg_train_loss,
+        'val_loss': avg_val_losses,
+        'config': config,
+    }
+
+def save_checkpoint(checkpoint, filepath, description="Checkpoint"):
+    """
+    Save a checkpoint to the specified filepath.
+    """
+    torch.save(checkpoint, filepath)
+    print(f"{description} saved at {filepath}")
+
+def save_models(config, timestamped_file_name, model, revin, optimizer, scheduler, best_val_loss, num_checkpoints, epoch, avg_train_loss, avg_val_losses):
+    """
+    Save the best model and periodic checkpoints.
+    """
+    checkpoint = create_checkpoint(model, revin, optimizer, scheduler, avg_train_loss, avg_val_losses, config, epoch)
+
+    # Save the best model
+    if avg_val_losses['random'] < best_val_loss:
+        best_val_loss = avg_val_losses['random']
+        save_checkpoint(checkpoint, os.path.join(timestamped_file_name, 'best_model.pth'), "Best model")
+
+    # Save periodic checkpoints
+    if num_checkpoints != 0 and (epoch + 1) % num_checkpoints == 0:
+        save_checkpoint(checkpoint, os.path.join(timestamped_file_name, f'checkpoint_epoch_{epoch+1}.pth'), "Periodic checkpoint")
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Pretraining script for PatchTST.")
     parser.add_argument('--config', type=str, required=True, help="Path to the configuration file.")
+    parser.add_argument('--checkpoint', type=str, help="Path to the checkpoint file to resume training.")
     args = parser.parse_args()
 
     # Get available device
@@ -315,6 +404,7 @@ def main():
     neptune_enabled = neptune_config['enabled']
 
     # Initialize Neptune
+    run = None
     if neptune_enabled:
         run = init_neptune(config)
 
@@ -418,8 +508,17 @@ def main():
     num_checkpoints = int(checkpoint_interval * num_epochs)
     val_mask_types = ['random', 'forecasting', 'fixed_position']
 
+    start_epoch = 0
+    best_val_loss = float('inf')
+    if args.checkpoint:
+        best_model_path = os.path.join(os.path.dirname(args.checkpoint), 'best_model.pth')
+        start_epoch, best_val_loss = load_checkpoint(
+            args.checkpoint, model, revin, optimizer, scheduler, device, best_model_path
+        )
+        scheduler = reinitialize_scheduler(scheduler, optimizer, train_configs, start_epoch, len(train_loader))
+
     # Training loop
-    epoch_pbar = tqdm(range(num_epochs), desc="Epochs")
+    epoch_pbar = tqdm(range(start_epoch, num_epochs), desc="Epochs")
     for epoch in epoch_pbar:
         avg_train_loss = train_epoch(device, model_config, neptune_enabled, run, timestamped_file_name, 
                                      train_loader, train_sample, train_num_mask_patches, model, revin, 
@@ -431,44 +530,6 @@ def main():
                                     revin, criterion, val_mask_types, epoch_pbar, epoch, avg_train_loss)
     
             save_models(config, timestamped_file_name, model, revin, optimizer, scheduler, best_val_loss, num_checkpoints, epoch, avg_train_loss, avg_val_losses)
-
-
-def save_models(config, timestamped_file_name, model, revin, optimizer, scheduler, best_val_loss, num_checkpoints, epoch, avg_train_loss, avg_val_losses):
-    if avg_val_losses['random'] < best_val_loss:
-        best_val_loss = avg_val_losses['random']
-        best_epoch = epoch
-
-            # Save the model
-        checkpoint = {
-                'epoch': epoch+1,
-                'model_state_dict': model.state_dict(),
-                'revin_state_dict': revin.state_dict() if revin else None,
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'train_loss': avg_train_loss,
-                'val_loss': avg_val_losses,
-                'config': config,
-            }
-        print(f"Best model saved at epoch {epoch+1} with val loss: {avg_val_losses['random']}")
-        torch.save(checkpoint, os.path.join(timestamped_file_name, 'best_model.pth'))
-
-        # Save the model every checkpoint_interval epochs
-    if num_checkpoints != 0 and (epoch + 1) % num_checkpoints == 0:
-            # save model, optimizer, scheduler, epoch
-        checkpoint = {
-                'epoch': epoch+1,
-                'model_state_dict': model.state_dict(),
-                'revin_state_dict': revin.state_dict() if revin else None,
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'train_loss': avg_train_loss,
-                'val_loss': avg_val_losses,
-                'config': config,
-            }
-
-        print(f"Checkpoint saved at epoch {epoch+1}")
-
-        torch.save(checkpoint, os.path.join(timestamped_file_name, f'checkpoint_epoch_{epoch+1}.pth'))
 
 
 def val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name, val_loader,
@@ -509,7 +570,7 @@ def val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name,
         # Log to Neptune
     if neptune_enabled:
         for mask_type, loss in avg_val_losses.items():
-            run[f"val/{mask_type}_epoch_loss"].log(loss)
+            run[f"val/{mask_type}_epoch_loss"].log(loss, step=epoch)
 
         # Update progress bar
     epoch_pbar.set_postfix({"Train Loss": avg_train_loss,
@@ -566,7 +627,7 @@ def train_epoch(device, model_config, neptune_enabled, run, timestamped_file_nam
 
         # Log to Neptune
     if neptune_enabled:
-        run["train/epoch_loss"].log(avg_train_loss)
+        run["train/epoch_loss"].log(avg_train_loss, step=epoch)
 
     plot_sample_reconstruction(
             model, revin, train_sample, 

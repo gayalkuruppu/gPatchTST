@@ -228,29 +228,14 @@ class TUAB_Dataset(TUH_Dataset):
 
         data = {"past_values": seq_x.copy(), 
                 "future_values": seq_y.copy(),
-                "age": metadata['age'],
+                "age": metadata["age"],
                 "gender": metadata["gender"],
-                "label": metadata['label']
+                "label": metadata["label"],
+                "filename": filename,
+                "patient_name": metadata["patient_name"]
                 }
         
         return data
-    # def __getitem__(self, index):
-    #     item = super().__getitem__(index)
-    #     filename = self.selected_files[index].split('_preprocessed.npy')[0]
-        
-    #     # Get metadata for the file
-    #     metadata = self.metadata.loc[filename]
-        
-    #     # Add metadata to the item
-    #     item['age'] = metadata['age']
-    #     item['gender'] = metadata['gender']
-    #     item['label'] = metadata['label']
-        
-    #     # Convert numpy arrays to PyTorch tensors
-    #     item['past_values'] = torch.from_numpy(item['past_values']).float()
-    #     item['future_values'] = torch.from_numpy(item['future_values']).float()
-        
-    #     return item
 
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 

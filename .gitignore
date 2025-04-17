@@ -16,6 +16,9 @@ __pycache__/
 # Saved models
 saved_models/
 
+# Results   
+tuab_pretrained_embeddings/
+
 # temporary files
 debug_plots/
 eval_plots/
