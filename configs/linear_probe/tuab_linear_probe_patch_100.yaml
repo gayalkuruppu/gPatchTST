@@ -1,0 +1,62 @@
+data:
+  root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed'
+  data_path: ''
+  csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed/file_lengths_map.csv'
+  metadata_csv_path: '/home/gayal/ssl-project/gpatchTST/tuhab_patient_metadata_ds.csv'
+  batch_size: 512
+  num_workers: 8
+  dl_seed: 0
+  prefetch_factor: 4
+  pin_memory: True
+  drop_last: True
+  n_vars: 19
+
+model:
+  seq_len: 1000
+  target_dim: 2
+  patch_length: 100
+  stride: 100
+  num_layers: 3
+  d_model: 128
+  num_heads: 16
+  shared_embedding: True
+  d_ff: 256
+  norm: 'BatchNorm'
+  attn_dropout: 0.0
+  dropout: 0.2
+  activation: 'relu'
+  res_attention: True
+  pe: 'sincos'
+  learn_pe: True
+  head_dropout: 0.2
+  head_type: 'classification'
+  use_cls_token: True
+  
+  revin: False
+  revin_eps: 1e-5
+  revin_affine: False # denorm False
+
+  mask_ratio: 0.3
+  masked_value: 0.0
+  independent_channel_masking: True
+  forecasting_num_patches: 3
+
+  val_mask_types:
+    - 'random'
+    - 'forecasting'
+    - 'fixed_position'
+
+  save_path: 'saved_models/pretrain'
+  checkpoint_interval: 0.1 # num_epochs or percentage
+
+train:
+  num_epochs: 100
+  learning_rate: 1e-4
+  weight_decay: 0
+  scheduler: 'cosine'
+  val_interval_epochs: 1
+
+neptune:
+  enabled: True
+  project: 'gayalkuruppu/tuh-ssl-test'
+  experiment_name: 'tuhab_pretrain_tuab_with_cls_token'

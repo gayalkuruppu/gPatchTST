@@ -51,16 +51,16 @@ class PatchTST(nn.Module):
         elif head_type == "prediction":
             self.head = PredictionHead(individual, self.n_vars, d_model, num_patch, target_dim, head_dropout, use_cls_token=use_cls_token)
         elif head_type == "regression":
-            self.head = RegressionHead(self.n_vars, d_model, target_dim, head_dropout, y_range)
+            self.head = RegressionHead(self.n_vars, d_model, target_dim, head_dropout, y_range, use_cls_token=use_cls_token)
         elif head_type == "classification":
-            self.head = ClassificationHead(self.n_vars, d_model, target_dim, head_dropout)
+            self.head = ClassificationHead(self.n_vars, d_model, target_dim, head_dropout, use_cls_token=use_cls_token)
 
 
     def forward(self, z):                             
         """
         z: tensor [bs x num_patch x n_vars x patch_len]
         """  
-        z = self.backbone(z)                                                                # z: [bs x nvars x d_model x num_patch]
+        z = self.backbone(z)                                                                # z: [bs x nvars x d_model x (num_patch or num_patch+1)]
         z = self.head(z)                                                                    
         # z: [bs x target_dim x nvars] for prediction
         #    [bs x target_dim] for regression
@@ -70,9 +70,10 @@ class PatchTST(nn.Module):
 
 
 class RegressionHead(nn.Module):
-    def __init__(self, n_vars, d_model, output_dim, head_dropout, y_range=None):
+    def __init__(self, n_vars, d_model, output_dim, head_dropout, y_range=None, use_cls_token=False):
         super().__init__()
         self.y_range = y_range
+        self.use_cls_token = use_cls_token
         self.flatten = nn.Flatten(start_dim=1)
         self.dropout = nn.Dropout(head_dropout)
         self.linear = nn.Linear(n_vars*d_model, output_dim)
@@ -82,7 +83,10 @@ class RegressionHead(nn.Module):
         x: [bs x nvars x d_model x num_patch]
         output: [bs x output_dim]
         """
-        x = x[:,:,:,-1]             # only consider the last item in the sequence, x: bs x nvars x d_model
+        if self.use_cls_token:
+            x = x[:, :, :, 0]             # use CLS token representation, x: bs x nvars x d_model
+        else:
+            x = x[:,:,:,-1]             # only consider the last item in the sequence, x: bs x nvars x d_model
         x = self.flatten(x)         # x: bs x nvars * d_model
         x = self.dropout(x)
         y = self.linear(x)         # y: bs x output_dim
@@ -91,8 +95,9 @@ class RegressionHead(nn.Module):
 
 
 class ClassificationHead(nn.Module):
-    def __init__(self, n_vars, d_model, n_classes, head_dropout):
+    def __init__(self, n_vars, d_model, n_classes, head_dropout, use_cls_token=False):
         super().__init__()
+        self.use_cls_token = use_cls_token
         self.flatten = nn.Flatten(start_dim=1)
         self.dropout = nn.Dropout(head_dropout)
         self.linear = nn.Linear(n_vars*d_model, n_classes)
@@ -102,10 +107,13 @@ class ClassificationHead(nn.Module):
         x: [bs x nvars x d_model x num_patch]
         output: [bs x n_classes]
         """
-        x = x[:,:,:,-1]             # only consider the last item in the sequence, x: bs x nvars x d_model
+        if self.use_cls_token:
+            x = x[:, :, :, 0]             # use CLS token representation, x: bs x nvars x d_model
+        else:
+            x = x[:,:,:,-1]             # only consider the last item in the sequence, x: bs x nvars x d_model
         x = self.flatten(x)         # x: bs x nvars * d_model
         x = self.dropout(x)
-        y = self.linear(x)         # y: bs x n_classes
+        y = self.linear(x)  # y: [bs x n_classes]
         return y
 
 
@@ -132,27 +140,26 @@ class PredictionHead(nn.Module):
             self.linear = nn.Linear(head_dim, forecast_len)
             self.dropout = nn.Dropout(head_dropout)
 
-
-    def forward(self, x):                     
+    def forward(self, x):
         """
         x: [bs x nvars x d_model x (num_patch+1)]
         output: [bs x forecast_len x nvars]
         """
         if self.use_cls_token:
-            x = x[:, :, :, 0]  # Use CLS token representation
+            x = x[:, :, :, 0]  # Use CLS token representation, x: [bs x nvars x d_model]
         elif self.individual:
             x_out = []
             for i in range(self.n_vars):
-                z = self.flattens[i](x[:,i,:,:])          # z: [bs x d_model * num_patch]
-                z = self.linears[i](z)                    # z: [bs x forecast_len]
+                z = self.flattens[i](x[:, i, :, :])  # z: [bs x d_model * num_patch]
+                z = self.linears[i](z)  # z: [bs x forecast_len]
                 z = self.dropouts[i](z)
                 x_out.append(z)
-            x = torch.stack(x_out, dim=1)         # x: [bs x nvars x forecast_len]
+            x = torch.stack(x_out, dim=1)  # x: [bs x nvars x forecast_len]
         else:
-            x = self.flatten(x)     # x: [bs x nvars x (d_model * num_patch)]    
+            x = self.flatten(x)  # x: [bs x nvars x (d_model * num_patch)]
             x = self.dropout(x)
-            x = self.linear(x)      # x: [bs x nvars x forecast_len]
-        return x.transpose(2,1)     # [bs x forecast_len x nvars]
+            x = self.linear(x)  # x: [bs x nvars x forecast_len]
+        return x.transpose(2, 1)  # [bs x forecast_len x nvars]
 
 
 class PretrainHead(nn.Module):

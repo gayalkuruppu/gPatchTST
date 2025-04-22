@@ -230,12 +230,15 @@ class TUAB_Dataset(TUH_Dataset):
                 "future_values": seq_y.copy(),
                 "age": metadata["age"],
                 "gender": metadata["gender"],
-                "label": metadata["label"],
+                "label": torch.tensor(0 if metadata["label"] == "normal" else 1, dtype=torch.long),
                 "filename": filename,
                 "patient_name": metadata["patient_name"]
                 }
         
         return data
+    
+
+# class MPI_LEMON_ALPHA()
 
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 
