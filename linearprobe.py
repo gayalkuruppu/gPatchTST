@@ -102,11 +102,10 @@ def transfer_weights(weights_path, model, exclude_head=True, device='cpu'):
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Linear probing script for PatchTST.")
-    # parser.add_argument('--config', type=str, required=True, help="Path to the configuration file.")
-    # parser.add_argument('--checkpoint', type=str, required=True, help="Path to the pretrained checkpoint.")
+    parser = argparse.ArgumentParser(description="Linear probing or finetuning script for PatchTST.")
     parser.add_argument('--config', type=str, help="Path to the configuration file.", default='configs/tuab_linear_probe_patch_100.yaml')
     parser.add_argument('--checkpoint', type=str, help="Path to the pretrained checkpoint.", default='/home/gayal/ssl-project/gpatchTST/saved_models/pretrain/tuhab_pretrain_tuab_with_cls_token/TUH-101/2025-04-17_21-01-03/checkpoint_epoch_100.pth')
+    parser.add_argument('--mode', type=str, choices=['linearprobe', 'finetune'], default='linearprobe', help="Choose between linear probing or finetuning.")
     args = parser.parse_args()
 
     # Get available device
@@ -161,17 +160,17 @@ def main():
                                 use_cls_token=model_config['use_cls_token'],
                             ).to(device)
 
-    # checkpoint = torch.load(args.checkpoint, map_location=device)
-    # backbone_state_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if k.startswith("backbone.")}
-    # model.backbone.load_state_dict(backbone_state_dict, strict=True)
-    # print(f"Loaded pretrained backbone from {args.checkpoint}")
     # Transfer weights
     model = transfer_weights(args.checkpoint, model, exclude_head=True, device=device)
     print(f"Loaded pretrained weights from {args.checkpoint}")
 
-    # Freeze backbone
-    for param in model.backbone.parameters():
-        param.requires_grad = False
+    # Freeze backbone if mode is linearprobe
+    if args.mode == 'linearprobe':
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+        print("Backbone frozen for linear probing.")
+    else:
+        print("Backbone trainable for finetuning.")
 
     # Initialize RevIN
     if model_config['revin']:
