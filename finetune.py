@@ -14,9 +14,60 @@ import argparse
 import os
 from datetime import datetime
 import shutil
-from utils.mask_utils import create_patches, create_mask, apply_mask
+from utils.mask_utils import create_patches
+import neptune
+from sklearn.metrics import roc_auc_score
 
-def train_linear_probe(model, revin, train_loader, optimizer, criterion, device, patch_len, stride):
+def calculate_auroc(output, target):
+    """
+    Calculate AUROC for classification.
+    """
+    output = torch.softmax(output, dim=1).detach().cpu().numpy()[:, 1]
+    target = target.detach().cpu().numpy()
+
+    return roc_auc_score(target, output)#, multi_class='ovr')
+
+def calculate_auroc_epoch(model, revin, data_loader, device, patch_len, stride):
+    """
+    Calculate AUROC for the entire dataset at the end of an epoch.
+    """
+    model.eval()
+    all_outputs = []
+    all_targets = []
+
+    with torch.no_grad():
+        for batch in data_loader:
+            data = batch['past_values'].to(device, non_blocking=True)
+            target = batch['label'].to(device, non_blocking=True)
+
+            if revin:
+                data = revin(data, mode='norm')
+                target = revin(target, mode='norm')
+
+            input_patches, _ = create_patches(data, patch_len, stride)
+            output = model(input_patches)
+
+            all_outputs.append(output)
+            all_targets.append(target)
+
+    all_outputs = torch.cat(all_outputs, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    return calculate_auroc(all_outputs, all_targets)
+
+def init_neptune(config):
+    """
+    Initialize a new Neptune run.
+    """
+    print("Creating a new Neptune run.")
+    return neptune.init_run(
+        project=config['neptune']['project'], 
+        name=config['neptune']['experiment_name'],
+        capture_stdout=False,
+        capture_stderr=False
+    )
+
+def train_epoch(model, revin, train_loader, optimizer, criterion, device, patch_len, stride):
     """
     Train the linear probe head on the frozen backbone.
     """
@@ -46,7 +97,7 @@ def train_linear_probe(model, revin, train_loader, optimizer, criterion, device,
     return train_loss / len(train_loader)
 
 
-def validate_linear_probe(model, revin, val_loader, criterion, device, patch_len, stride):
+def val_epoch(model, revin, val_loader, criterion, device, patch_len, stride):
     """
     Validate the linear probe head on the frozen backbone.
     """
@@ -103,9 +154,8 @@ def transfer_weights(weights_path, model, exclude_head=True, device='cpu'):
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Linear probing or finetuning script for PatchTST.")
-    parser.add_argument('--config', type=str, help="Path to the configuration file.", default='configs/tuab_linear_probe_patch_100.yaml')
+    parser.add_argument('--config', type=str, help="Path to the configuration file.", default='configs/linear_probe/tuab_linear_probe_patch_100.yaml')
     parser.add_argument('--checkpoint', type=str, help="Path to the pretrained checkpoint.", default='/home/gayal/ssl-project/gpatchTST/saved_models/pretrain/tuhab_pretrain_tuab_with_cls_token/TUH-101/2025-04-17_21-01-03/checkpoint_epoch_100.pth')
-    parser.add_argument('--mode', type=str, choices=['linearprobe', 'finetune'], default='linearprobe', help="Choose between linear probing or finetuning.")
     args = parser.parse_args()
 
     # Get available device
@@ -119,6 +169,13 @@ def main():
     data_config = config['data']
     model_config = config['model']
     train_configs = config['train']
+    neptune_config = config['neptune']
+    neptune_enabled = neptune_config['enabled']
+
+    # Initialize Neptune
+    run = None
+    if neptune_enabled:
+        run = init_neptune(config)
 
     # Create data loaders
     train_loader, val_loader, _ = get_tuab_dataloaders(
@@ -164,13 +221,16 @@ def main():
     model = transfer_weights(args.checkpoint, model, exclude_head=True, device=device)
     print(f"Loaded pretrained weights from {args.checkpoint}")
 
+
     # Freeze backbone if mode is linearprobe
-    if args.mode == 'linearprobe':
+    if model_config['mode'] == 'linearprobe':
         for param in model.backbone.parameters():
             param.requires_grad = False
         print("Backbone frozen for linear probing.")
+        model_config['save_path'] = os.path.join(model_config['save_path'], 'linear_probe')
     else:
         print("Backbone trainable for finetuning.")
+        model_config['save_path'] = os.path.join(model_config['save_path'], 'finetune')
 
     # Initialize RevIN
     if model_config['revin']:
@@ -198,23 +258,59 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
 
+    # Model saving path
+    if not os.path.exists(model_config['save_path']):
+        os.makedirs(model_config['save_path'])
+
+    # Create a folder with the current date and time
+    experiment_name = neptune_config['experiment_name']
+    if neptune_enabled:
+        experiment_id = run["sys/id"].fetch()
+        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, str(experiment_id), datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    else:
+        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+
+    if not os.path.exists(timestamped_file_name):
+        os.makedirs(timestamped_file_name)
+
+    # Save a copy of the configuration file for reproducibility
+    config_backup_path = os.path.join(timestamped_file_name, os.path.basename(config_file_path))
+    shutil.copy(config_file_path, config_backup_path)
+    print(f"Configuration saved to {config_backup_path}")
+
     # Training loop
     best_val_loss = float('inf')
+    best_val_auroc = 0.0
     for epoch in range(train_configs['num_epochs']):
         print(f"Epoch {epoch + 1}/{train_configs['num_epochs']}")
 
-        train_loss = train_linear_probe(model, revin, train_loader, optimizer, criterion, device, model_config['patch_length'], model_config['stride'])
-        val_loss = validate_linear_probe(model, revin, val_loader, criterion, device, model_config['patch_length'], model_config['stride'])
+        train_epoch_loss = train_epoch(model, revin, train_loader, optimizer, criterion, device, model_config['patch_length'], model_config['stride'])
+        val_epoch_loss = val_epoch(model, revin, val_loader, criterion, device, model_config['patch_length'], model_config['stride'])
 
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        train_auroc = calculate_auroc_epoch(model, revin, train_loader, device, model_config['patch_length'], model_config['stride'])
+        val_auroc = calculate_auroc_epoch(model, revin, val_loader, device, model_config['patch_length'], model_config['stride'])
+
+        print(f"Train Loss: {train_epoch_loss:.4f}, Val Loss: {val_epoch_loss:.4f}")
+        print(f"Train AUROC: {train_auroc:.4f}, Val AUROC: {val_auroc:.4f}")
 
         scheduler.step()
 
-        # Save the best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), "best_linear_probe_model.pth")
-            print("Saved best model.")
+        # Log metrics to Neptune
+        if run:
+            run["train/epoch_loss"].log(train_epoch_loss, step=epoch)
+            run["val/epoch_loss"].log(val_epoch_loss, step=epoch)
+            run["train/epoch_auroc"].log(train_auroc, step=epoch)
+            run["val/epoch_auroc"].log(val_auroc, step=epoch)
+
+        # Save the best model based on validation loss and AUROC
+        if val_epoch_loss < best_val_loss:
+            best_val_loss = val_epoch_loss
+            best_model_path = os.path.join(timestamped_file_name, "best_linear_probe_model.pth")
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Saved best model based on validation loss at {best_model_path}.")
+
+    if run:
+        run.stop()
 
 if __name__ == "__main__":
     main()

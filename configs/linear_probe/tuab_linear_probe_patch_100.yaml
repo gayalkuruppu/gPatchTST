@@ -31,6 +31,7 @@ model:
   head_dropout: 0.2
   head_type: 'classification'
   use_cls_token: True
+  mode: 'linearprobe'
   
   revin: False
   revin_eps: 1e-5
@@ -41,17 +42,12 @@ model:
   independent_channel_masking: True
   forecasting_num_patches: 3
 
-  val_mask_types:
-    - 'random'
-    - 'forecasting'
-    - 'fixed_position'
-
-  save_path: 'saved_models/pretrain'
+  save_path: 'saved_models/supervised_learning'
   checkpoint_interval: 0.1 # num_epochs or percentage
 
 train:
   num_epochs: 100
-  learning_rate: 1e-4
+  learning_rate: 1e-5
   weight_decay: 0
   scheduler: 'cosine'
   val_interval_epochs: 1
@@ -59,4 +55,4 @@ train:
 neptune:
   enabled: True
   project: 'gayalkuruppu/tuh-ssl-test'
-  experiment_name: 'tuhab_pretrain_tuab_with_cls_token'
+  experiment_name: 'tuab_linear_probe_patch_100'
