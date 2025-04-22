@@ -201,6 +201,14 @@ def plot_sample_reconstruction(model, revin, sample, mask_ratio, masked_value, m
     tick_positions = [i * patch_len for i in range(num_patches + 1)]
     tick_labels = [str(i * stride) for i in range(num_patches + 1)]
 
+    # Interleave tick labels (e.g., show every other label)
+    interleave_factor = max(1, len(tick_positions) // 20)  # Adjust based on the number of patches
+    tick_labels = [label if i % interleave_factor == 0 else '' for i, label in enumerate(tick_labels)]
+
+    # Dynamically increase plot size horizontally based on the number of patches
+    fig_width = max(15, num_patches // 10)  # Adjust width dynamically
+    fig.set_size_inches(fig_width, fig.get_size_inches()[1])  # Keep the height unchanged
+
     for ax in axes:
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(tick_labels)
@@ -213,7 +221,7 @@ def plot_sample_reconstruction(model, revin, sample, mask_ratio, masked_value, m
     
     plt.tight_layout()
     plt.subplots_adjust(top=0.95) # Adjust top to make room for the suptitle
-    plt.savefig(os.path.join(split, f'reconstruction_epoch_{epoch}_mask_type_{mask_type}.png'))
+    plt.savefig(os.path.join(split, f'reconstruction_epoch_{epoch+1}_mask_type_{mask_type}.png'))
     plt.close()
     
     return
@@ -469,7 +477,8 @@ def main():
                                 pe=model_config['pe'],
                                 learn_pe=model_config['learn_pe'],
                                 head_dropout=model_config['head_dropout'],
-                                head_type=model_config['head_type']
+                                head_type=model_config['head_type'],
+                                use_cls_token=model_config['use_cls_token'],
                             ).to(device)
     
     # Initialize Revin
@@ -506,7 +515,8 @@ def main():
     best_epoch = 0
     checkpoint_interval = model_config['checkpoint_interval']
     num_checkpoints = int(checkpoint_interval * num_epochs)
-    val_mask_types = ['random', 'forecasting', 'fixed_position']
+    val_mask_types = model_config['val_mask_types']
+    print(f"num_checkpoints: {num_checkpoints}, val_mask_types: {val_mask_types}")
 
     start_epoch = 0
     best_val_loss = float('inf')
@@ -524,7 +534,7 @@ def main():
                                      train_loader, train_sample, train_num_mask_patches, model, revin, 
                                      optimizer, scheduler, criterion, epoch)
         
-        if epoch % val_interval_epochs == 0:
+        if (epoch+1) % val_interval_epochs == 0:
             avg_val_losses = val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name, 
                                     val_loader, val_sample, num_patches, train_num_mask_patches, model, 
                                     revin, criterion, val_mask_types, epoch_pbar, epoch, avg_train_loss)
@@ -538,72 +548,50 @@ def val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name,
     
     val_mask_losses = {mask_type: 0 for mask_type in val_mask_types}
 
-    val_step_pbar = tqdm(val_loader, desc="Validation", total=len(val_loader), leave=False)
-    for batch in val_step_pbar:
-        val_step_loss = val_step(model, revin, batch, criterion, model_config, device, val_mask_type='random')
-        val_mask_losses['random'] += val_step_loss/train_num_mask_patches
+    for mask_type in val_mask_types:
+        val_step_pbar = tqdm(val_loader, desc=f"Validation ({mask_type})", total=len(val_loader), leave=False)
+        for batch in val_step_pbar:
+            if mask_type == 'fixed_position':
+                for fixed_position in range(num_patches):
+                    val_step_loss = val_step(
+                        model, revin, batch, criterion, model_config, device,
+                        val_mask_type=mask_type, fixed_position=fixed_position
+                    )
+                    val_mask_losses[mask_type] += val_step_loss / num_patches
+            else:
+                val_step_loss = val_step(
+                    model, revin, batch, criterion, model_config, device,
+                    val_mask_type=mask_type
+                )
+                divisor = train_num_mask_patches if mask_type == 'random' else model_config['forecasting_num_patches']
+                val_mask_losses[mask_type] += val_step_loss / divisor
+
             # Update progress bar
-        val_step_pbar.set_postfix({"Val Loss": val_mask_losses['random'] / (val_step_pbar.n + 1)})
-
-        # Validation step for forecasting masking
-    val_step_pbar = tqdm(val_loader, desc="Validation", total=len(val_loader), leave=False)
-    forecasting_num_patches = model_config['forecasting_num_patches']
-    for batch in val_step_pbar:
-        val_step_loss = val_step(model, revin, batch, criterion, model_config, device, val_mask_type='forecasting')
-        val_mask_losses['forecasting'] += val_step_loss/forecasting_num_patches
-            # Update progress bar
-        val_step_pbar.set_postfix({"Val Loss": val_mask_losses['forecasting'] / (val_step_pbar.n + 1)})
-
-        # Validation step for fixed position masking
-    val_step_pbar = tqdm(val_loader, desc="Validation", total=len(val_loader), leave=False)
-    for batch in val_step_pbar:
-        for fixed_position in range(num_patches):
-            val_step_loss = val_step(model, revin, batch, criterion, model_config, device, val_mask_type='fixed_position', fixed_position=fixed_position)
-            val_mask_losses['fixed_position'] += val_step_loss/num_patches
-                # Update progress bar
-            val_step_pbar.set_postfix({"Val Loss": val_mask_losses['fixed_position'] / (val_step_pbar.n + 1)})
-
-
+            val_step_pbar.set_postfix({"Val Loss": val_mask_losses[mask_type] / (val_step_pbar.n + 1)})
 
     avg_val_losses = {mask_type: loss / len(val_loader) for mask_type, loss in val_mask_losses.items()}
 
-        # Log to Neptune
+    # Log to Neptune
     if neptune_enabled:
         for mask_type, loss in avg_val_losses.items():
             run[f"val/{mask_type}_epoch_loss"].log(loss, step=epoch)
 
-        # Update progress bar
-    epoch_pbar.set_postfix({"Train Loss": avg_train_loss,
-                            "Val Loss": {mask_type: loss for mask_type, loss in avg_val_losses.items()}})
+    # Update progress bar
+    epoch_pbar.set_postfix({
+        "Train Loss": avg_train_loss,
+        "Val Loss": avg_val_losses
+    })
 
-
-    plot_sample_reconstruction(
-            model, revin, val_sample, 
-            model_config['mask_ratio'], model_config['masked_value'], 'random',
-            model_config['stride'], model_config['independent_channel_masking'],
-            model_config['patch_length'], device, epoch, 
-            os.path.join(timestamped_file_name, 'val'),
-            num_channels=6 
-        )
-
-    plot_sample_reconstruction(
+    # Plot sample reconstructions
+    for mask_type in ['random', 'forecasting', 'backcasting']:
+        plot_sample_reconstruction(
             model, revin, val_sample,
-            model_config['mask_ratio'], model_config['masked_value'], 'forecasting',
+            model_config['mask_ratio'], model_config['masked_value'], mask_type,
             model_config['stride'], model_config['independent_channel_masking'],
             model_config['patch_length'], device, epoch,
             os.path.join(timestamped_file_name, 'val'),
             num_channels=6,
-            forecasting_num_patches=model_config['forecasting_num_patches']
-        )
-
-    plot_sample_reconstruction(
-            model, revin, val_sample,
-            model_config['mask_ratio'], model_config['masked_value'], 'backcasting',
-            model_config['stride'], model_config['independent_channel_masking'],
-            model_config['patch_length'], device, epoch,
-            os.path.join(timestamped_file_name, 'val'),
-            num_channels=6,
-            forecasting_num_patches=model_config['forecasting_num_patches']
+            forecasting_num_patches=model_config.get('forecasting_num_patches')
         )
         
     return avg_val_losses
