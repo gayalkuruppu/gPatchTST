@@ -39,8 +39,10 @@ def positional_encoding(pe, learn_pe, q_len, d_model):
     elif pe == 'uniform':
         W_pos = torch.zeros((q_len, 1))
         nn.init.uniform_(W_pos, a=0.0, b=0.1)
-    elif pe == 'sincos': W_pos = PositionalEncoding(q_len, d_model, normalize=True)
-    else: raise ValueError(f"{pe} is not a valid pe (positional encoder. Available types: 'gauss'=='normal', \
+    elif pe == 'sincos': 
+        W_pos = PositionalEncoding(q_len, d_model, normalize=True)
+    else: 
+        raise ValueError(f"{pe} is not a valid pe (positional encoder. Available types: 'gauss'=='normal', \
         'zeros', 'zero', uniform', 'sincos', None.)")
     return nn.Parameter(W_pos, requires_grad=learn_pe)
 

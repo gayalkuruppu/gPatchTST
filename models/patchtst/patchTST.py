@@ -1,4 +1,3 @@
-
 __all__ = ['PatchTST']
 
 # Cell
@@ -30,7 +29,7 @@ class PatchTST(nn.Module):
                  res_attention:bool=True, pre_norm:bool=False, store_attn:bool=False,
                  pe:str='zeros', learn_pe:bool=True, head_dropout = 0, 
                  head_type = "prediction", individual = False, 
-                 y_range:Optional[tuple]=None, verbose:bool=False, **kwargs):
+                 y_range:Optional[tuple]=None, verbose:bool=False, use_cls_token:bool=False, **kwargs):
 
         super().__init__()
 
@@ -41,16 +40,16 @@ class PatchTST(nn.Module):
                                 shared_embedding=shared_embedding, d_ff=d_ff,
                                 attn_dropout=attn_dropout, dropout=dropout, act=act, 
                                 res_attention=res_attention, pre_norm=pre_norm, store_attn=store_attn,
-                                pe=pe, learn_pe=learn_pe, verbose=verbose, **kwargs)
+                                pe=pe, learn_pe=learn_pe, verbose=verbose, use_cls_token=use_cls_token, **kwargs)
 
         # Head
         self.n_vars = c_in
         self.head_type = head_type
 
         if head_type == "pretrain":
-            self.head = PretrainHead(d_model, patch_len, head_dropout) # custom head passed as a partial func with all its kwargs
+            self.head = PretrainHead(d_model, patch_len, head_dropout, use_cls_token) # custom head passed as a partial func with all its kwargs
         elif head_type == "prediction":
-            self.head = PredictionHead(individual, self.n_vars, d_model, num_patch, target_dim, head_dropout)
+            self.head = PredictionHead(individual, self.n_vars, d_model, num_patch, target_dim, head_dropout, use_cls_token=use_cls_token)
         elif head_type == "regression":
             self.head = RegressionHead(self.n_vars, d_model, target_dim, head_dropout, y_range)
         elif head_type == "classification":
@@ -60,7 +59,7 @@ class PatchTST(nn.Module):
     def forward(self, z):                             
         """
         z: tensor [bs x num_patch x n_vars x patch_len]
-        """   
+        """  
         z = self.backbone(z)                                                                # z: [bs x nvars x d_model x num_patch]
         z = self.head(z)                                                                    
         # z: [bs x target_dim x nvars] for prediction
@@ -111,13 +110,14 @@ class ClassificationHead(nn.Module):
 
 
 class PredictionHead(nn.Module):
-    def __init__(self, individual, n_vars, d_model, num_patch, forecast_len, head_dropout=0, flatten=False):
+    def __init__(self, individual, n_vars, d_model, num_patch, forecast_len, head_dropout=0, flatten=False, use_cls_token=False):
         super().__init__()
 
         self.individual = individual
         self.n_vars = n_vars
         self.flatten = flatten
-        head_dim = d_model*num_patch
+        self.use_cls_token = use_cls_token
+        head_dim = d_model * (1 if use_cls_token else num_patch)
 
         if self.individual:
             self.linears = nn.ModuleList()
@@ -135,10 +135,12 @@ class PredictionHead(nn.Module):
 
     def forward(self, x):                     
         """
-        x: [bs x nvars x d_model x num_patch]
+        x: [bs x nvars x d_model x (num_patch+1)]
         output: [bs x forecast_len x nvars]
         """
-        if self.individual:
+        if self.use_cls_token:
+            x = x[:, :, :, 0]  # Use CLS token representation
+        elif self.individual:
             x_out = []
             for i in range(self.n_vars):
                 z = self.flattens[i](x[:,i,:,:])          # z: [bs x d_model * num_patch]
@@ -154,20 +156,25 @@ class PredictionHead(nn.Module):
 
 
 class PretrainHead(nn.Module):
-    def __init__(self, d_model, patch_len, dropout):
+    def __init__(self, d_model, patch_len, dropout, use_cls_token=False):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         self.linear = nn.Linear(d_model, patch_len)
+        self.use_cls_token = use_cls_token
 
     def forward(self, x):
         """
-        x: tensor [bs x nvars x d_model x num_patch]
+        x: tensor [bs x nvars x d_model x (num_patch or num_patch+1)]
         output: tensor [bs x nvars x num_patch x patch_len]
         """
 
-        x = x.transpose(2,3)                     # [bs x nvars x num_patch x d_model]
-        x = self.linear( self.dropout(x) )      # [bs x nvars x num_patch x patch_len]
-        x = x.permute(0,2,1,3)                  # [bs x num_patch x nvars x patch_len]
+        x = x.transpose(2,3)                     # [bs x nvars x (num_patch or num_patch+1) x d_model]
+        x = self.dropout(x)                     # [bs x nvars x (num_patch or num_patch+1) x d_model]
+        x = self.linear(x)                     # [bs x nvars x (num_patch or num_patch+1) x patch_len]
+        # x = self.linear( self.dropout(x) )      # [bs x nvars x (num_patch or num_patch+1) x patch_len]
+        x = x.permute(0,2,1,3)                  # [bs x (num_patch or num_patch+1) x nvars x patch_len]
+        if self.use_cls_token:
+            x = x[:, 1:, :, :]                  # Remove CLS token
         return x
 
 
@@ -176,7 +183,7 @@ class PatchTSTEncoder(nn.Module):
                  n_layers=3, d_model=128, n_heads=16, shared_embedding=True,
                  d_ff=256, norm='BatchNorm', attn_dropout=0., dropout=0., act="gelu", store_attn=False,
                  res_attention=True, pre_norm=False,
-                 pe='zeros', learn_pe=True, verbose=False, **kwargs):
+                 pe='zeros', learn_pe=True, verbose=False, use_cls_token=False, **kwargs):
 
         super().__init__()
         self.n_vars = c_in
@@ -184,6 +191,7 @@ class PatchTSTEncoder(nn.Module):
         self.patch_len = patch_len
         self.d_model = d_model
         self.shared_embedding = shared_embedding        
+        self.use_cls_token = use_cls_token
 
         # Input encoding: projection of feature vectors onto a d-dim vector space
         if not shared_embedding: 
@@ -193,7 +201,7 @@ class PatchTSTEncoder(nn.Module):
             self.W_P = nn.Linear(patch_len, d_model)      
 
         # Positional encoding
-        self.W_pos = positional_encoding(pe, learn_pe, num_patch, d_model)
+        self.W_pos = positional_encoding(pe, learn_pe, num_patch + (1 if use_cls_token else 0), d_model)
 
         # Residual dropout
         self.dropout = nn.Dropout(dropout)
@@ -202,6 +210,10 @@ class PatchTSTEncoder(nn.Module):
         self.encoder = TSTEncoder(d_model, n_heads, d_ff=d_ff, norm=norm, attn_dropout=attn_dropout, dropout=dropout,
                                    pre_norm=pre_norm, activation=act, res_attention=res_attention, n_layers=n_layers, 
                                     store_attn=store_attn)
+
+        # CLS token
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
 
     def forward(self, x) -> Tensor:          
         """
@@ -218,15 +230,20 @@ class PatchTSTEncoder(nn.Module):
         else:
             x = self.W_P(x)                                                      # x: [bs x num_patch x nvars x d_model]
         x = x.transpose(1,2)                                                     # x: [bs x nvars x num_patch x d_model]        
+        x = torch.reshape(x, (bs*n_vars, num_patch, self.d_model))               # [bs*nvars x num_patch x d_model]
 
-        u = torch.reshape(x, (bs*n_vars, num_patch, self.d_model) )              # u: [bs * nvars x num_patch x d_model]
-        u = self.dropout(u + self.W_pos)                                         # u: [bs * nvars x num_patch x d_model]
+        # Add CLS token if enabled
+        if self.use_cls_token:
+            cls_tokens = self.cls_token.expand(bs * n_vars, -1, -1)              # [bs*nvars x 1 x d_model]
+            x = torch.cat((cls_tokens, x), dim=1)                                # [bs*nvars x (num_patch+1) x d_model]
+
+        # Add positional encoding
+        x = self.dropout(x + self.W_pos)                                         # [bs*nvars x (num_patch+1 or num_patch) x d_model]
 
         # Encoder
-        z = self.encoder(u)                                                      # z: [bs * nvars x num_patch x d_model]
-        z = torch.reshape(z, (-1,n_vars, num_patch, self.d_model))               # z: [bs x nvars x num_patch x d_model]
-        z = z.permute(0,1,3,2)                                                   # z: [bs x nvars x d_model x num_patch]
-
+        z = self.encoder(x)                                                      # [bs*nvars x (num_patch+1 or num_patch) x d_model]
+        z = torch.reshape(z, (-1, n_vars, num_patch + (1 if self.use_cls_token else 0), self.d_model)) # [bs x nvars x (num_patch+1 or num_patch) x d_model]
+        z = z.permute(0, 1, 3, 2)                                                # [bs x nvars x d_model x (num_patch+1 or num_patch)]
         return z
     
     
