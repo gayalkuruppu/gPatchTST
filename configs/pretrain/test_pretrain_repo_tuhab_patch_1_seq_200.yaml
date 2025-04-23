@@ -2,15 +2,15 @@ data:
   root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed'
   data_path: ''
   csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed/file_lengths_map.csv'
-  batch_size: 128
-  num_workers: 8
-  prefetch_factor: 4
+  batch_size: 32
+  num_workers: 4
+  prefetch_factor: 2
   pin_memory: True
   drop_last: True
   n_vars: 19
 
 model:
-  seq_len: 100
+  seq_len: 200
   target_dim: 0
   patch_length: 1
   stride: 1
@@ -37,19 +37,23 @@ model:
   mask_ratio: 0.3
   masked_value: 0.0
   independent_channel_masking: True
-  forecasting_num_patches: 30
+  forecasting_num_patches: 60
+
+  val_mask_types:
+    - 'random'
+    - 'forecasting'
 
   save_path: 'saved_models/pretrain'
-  checkpoint_interval: 0.05 # num_epochs or percentage
+  checkpoint_interval: 0.1 # num_epochs or percentage
 
 train:
-  num_epochs: 200
+  num_epochs: 100
   learning_rate: 1e-4
   weight_decay: 0
   scheduler: 'cosine'
-  val_interval_epochs: 1
+  val_interval_epochs: 10
 
 neptune:
   enabled: True
   project: 'gayalkuruppu/tuh-ssl-test'
-  experiment_name: 'tuhab_pretrain_patch_len_1_seq_100'
+  experiment_name: 'tuhab_pretrain_patch_len_1_seq_200'

@@ -237,6 +237,64 @@ class TUAB_Dataset(TUH_Dataset):
         
         return data
     
+class TUAB_Dataset_ALPHA(TUH_Dataset):
+    def __init__(self, root_path, data_path, csv_path, alpha_dict_path=None,
+                 size=None, split='train', train_split=0.7, test_split=0.2, seed=42):
+        super().__init__(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
+                         size=size, split=split, train_split=train_split, test_split=test_split, seed=seed)
+        
+        self.alpha_dict = self._read_alpha_dict(alpha_dict_path)
+
+    def _read_alpha_dict(self, alpha_dict_path):
+        """Read alpha power dictionary from pickle file"""
+        if alpha_dict_path:
+            with open(alpha_dict_path, 'rb') as f:
+                alpha_dict = pickle.load(f)
+        else:
+            raise ValueError("Alpha dictionary path must be provided")
+        
+        return alpha_dict
+    
+    def __getitem__(self, index):
+        # Binary search to find file index more efficiently
+        left, right = 0, len(self.cumulative_lengths) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            if index < self.cumulative_lengths[mid]:
+                if mid == 0 or index >= self.cumulative_lengths[mid-1]:
+                    file_index = mid
+                    break
+                right = mid - 1
+            else:
+                left = mid + 1
+        
+        # Calculate local index in file
+        if file_index > 0:
+            local_index = index - self.cumulative_lengths[file_index - 1]
+        else:
+            local_index = index
+        
+        # Load tensor directly without caching
+        tensor = self._load_tensor(file_index)
+
+        # Extract the sequence
+        seq_x = tensor[local_index*self.seq_len:(local_index+1)*self.seq_len]
+        seq_y = tensor[(local_index+1)*self.seq_len:(local_index+1)*self.seq_len + self.pred_len]
+        
+        filename = self.selected_files[file_index].split('_preprocessed.npy')[0]
+        alpha_powers_arr = self.alpha_dict[filename] # (n_epochs, n_channels)
+
+        # get the relative epoch
+        epoch_alpha_power = np.array(alpha_powers_arr)[local_index] # (n_channels,)
+
+        alpha_power = torch.tensor(epoch_alpha_power, dtype=torch.float32)
+        
+        data = {"past_values": seq_x.copy(), 
+                "future_values": seq_y.copy(),
+                "alpha_power": alpha_power,
+                }
+
+        return data
 
 # class MPI_LEMON_ALPHA()
 
@@ -272,6 +330,31 @@ def get_tuab_dataloaders(root_path, data_path, csv_path, metadata_csv_path=None,
                                size=size, split='val', seed=seed)
     test_dataset = TUAB_Dataset(root_path, data_path, csv_path, metadata_csv_path=metadata_csv_path,
                                 size=size, split='test', seed=seed)
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, prefetch_factor=prefetch_factor,
+                              pin_memory=pin_memory, drop_last=drop_last)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, prefetch_factor=prefetch_factor,
+                            pin_memory=pin_memory, drop_last=drop_last)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                             num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
+    
+    return train_loader, val_loader, test_loader
+
+
+def get_tuab_alpha_dataloaders(root_path, data_path, csv_path, alpha_dict_path=None,
+                            batch_size=64, num_workers=4, prefetch_factor=1, 
+                            pin_memory=False, drop_last=False, size=None, seed=42):
+    # Create datasets
+    train_dataset = TUAB_Dataset_ALPHA(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
+                                       size=size, split='train', seed=seed)
+    val_dataset = TUAB_Dataset_ALPHA(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
+                                     size=size, split='val', seed=seed)
+    test_dataset = TUAB_Dataset_ALPHA(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
+                                      size=size, split='test', seed=seed)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,

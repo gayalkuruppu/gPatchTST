@@ -29,3 +29,9 @@ tuhab_patient_metadata_ds.csv
 check_status.ipynb
 dataloading.ipynb
 pretrain_old.py
+
+# logs
+preprocessing/logs/*
+
+# preprocessed metadata
+preprocessing/outputs/

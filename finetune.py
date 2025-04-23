@@ -6,7 +6,7 @@ from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import OneCycleLR
 from tqdm import tqdm
-from data import get_tuab_dataloaders
+from data import get_tuab_dataloaders, get_tuab_alpha_dataloaders
 from configs import Config
 from get_models import get_patchTST_model
 from models.patchtst.layers.revin import RevIN
@@ -287,11 +287,13 @@ def main():
         train_epoch_loss = train_epoch(model, revin, train_loader, optimizer, criterion, device, model_config['patch_length'], model_config['stride'])
         val_epoch_loss = val_epoch(model, revin, val_loader, criterion, device, model_config['patch_length'], model_config['stride'])
 
-        train_auroc = calculate_auroc_epoch(model, revin, train_loader, device, model_config['patch_length'], model_config['stride'])
-        val_auroc = calculate_auroc_epoch(model, revin, val_loader, device, model_config['patch_length'], model_config['stride'])
-
         print(f"Train Loss: {train_epoch_loss:.4f}, Val Loss: {val_epoch_loss:.4f}")
-        print(f"Train AUROC: {train_auroc:.4f}, Val AUROC: {val_auroc:.4f}")
+
+        if model_config['head_type'] == 'classification':
+            train_auroc = calculate_auroc_epoch(model, revin, train_loader, device, model_config['patch_length'], model_config['stride'])
+            val_auroc = calculate_auroc_epoch(model, revin, val_loader, device, model_config['patch_length'], model_config['stride'])
+
+            print(f"Train AUROC: {train_auroc:.4f}, Val AUROC: {val_auroc:.4f}")
 
         scheduler.step()
 
@@ -299,8 +301,10 @@ def main():
         if run:
             run["train/epoch_loss"].log(train_epoch_loss, step=epoch)
             run["val/epoch_loss"].log(val_epoch_loss, step=epoch)
-            run["train/epoch_auroc"].log(train_auroc, step=epoch)
-            run["val/epoch_auroc"].log(val_auroc, step=epoch)
+            
+            if model_config['head_type'] == 'classification':
+                run["train/epoch_auroc"].log(train_auroc, step=epoch)
+                run["val/epoch_auroc"].log(val_auroc, step=epoch)
 
         # Save the best model based on validation loss and AUROC
         if val_epoch_loss < best_val_loss:
