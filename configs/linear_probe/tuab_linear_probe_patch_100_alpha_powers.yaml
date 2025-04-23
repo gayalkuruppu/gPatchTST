@@ -3,17 +3,19 @@ data:
   data_path: ''
   csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed/file_lengths_map.csv'
   metadata_csv_path: '/home/gayal/ssl-project/gpatchTST/tuhab_patient_metadata_ds.csv'
+  metadata_dict_path: '/home/gayal/ssl-project/gpatchTST/preprocessing/outputs/alpha_power_tuab_dict.pkl'
   batch_size: 512
   num_workers: 8
   dl_seed: 0
   prefetch_factor: 4
   pin_memory: True
   drop_last: True
-  n_vars: 19
+  n_vars: 1
+  dataloader: 'tuab_alpha_powers'
 
 model:
   seq_len: 1000
-  target_dim: 2
+  target_dim: 1
   patch_length: 100
   stride: 100
   num_layers: 3
@@ -29,9 +31,10 @@ model:
   pe: 'sincos'
   learn_pe: True
   head_dropout: 0.2
-  head_type: 'classification'
+  head_type: 'regression'
   use_cls_token: True
   mode: 'linearprobe'
+  o1_only: False
   
   revin: False
   revin_eps: 1e-5
@@ -50,9 +53,9 @@ train:
   learning_rate: 1e-5
   weight_decay: 0
   scheduler: 'cosine'
-  val_interval_epochs: 1
+  val_interval_epochs: 10
 
 neptune:
   enabled: True
-  project: 'gayalkuruppu/tuh-ssl-test'
+  project: 'gayalkuruppu/ssl-eval'
   experiment_name: 'tuab_linear_probe_patch_100'

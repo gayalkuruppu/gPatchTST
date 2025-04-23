@@ -7,6 +7,12 @@ import pandas as pd
 import random
 import pickle
 
+# [
+#         'EEG FP1-REF', 'EEG FP2-REF', 'EEG F7-REF', 'EEG F3-REF', 'EEG FZ-REF', 'EEG F4-REF', 'EEG F8-REF',
+#         'EEG T3-REF', 'EEG C3-REF', 'EEG CZ-REF', 'EEG C4-REF', 'EEG T4-REF',
+#         'EEG T5-REF', 'EEG P3-REF', 'EEG PZ-REF', 'EEG P4-REF', 'EEG T6-REF', 'EEG O1-REF', 'EEG O2-REF'
+#     ]
+
 class TUH_Dataset(Dataset):
     def __init__(self, root_path, data_path, csv_path, size=None,
                  split='train', train_split=0.7, test_split=0.2, seed=42):
@@ -240,8 +246,8 @@ class TUAB_Dataset(TUH_Dataset):
 class TUAB_Dataset_ALPHA(TUH_Dataset):
     def __init__(self, root_path, data_path, csv_path, alpha_dict_path=None,
                  size=None, split='train', train_split=0.7, test_split=0.2, seed=42):
-        super().__init__(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
-                         size=size, split=split, train_split=train_split, test_split=test_split, seed=seed)
+        super().__init__(root_path, data_path, csv_path, size=size, 
+                         split=split, train_split=train_split, test_split=test_split, seed=seed)
         
         self.alpha_dict = self._read_alpha_dict(alpha_dict_path)
 
@@ -291,7 +297,7 @@ class TUAB_Dataset_ALPHA(TUH_Dataset):
         
         data = {"past_values": seq_x.copy(), 
                 "future_values": seq_y.copy(),
-                "alpha_power": alpha_power,
+                "label": alpha_power,
                 }
 
         return data
