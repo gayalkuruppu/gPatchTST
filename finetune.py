@@ -73,6 +73,7 @@ def train_epoch(model, revin, train_loader, optimizer, criterion, device, patch_
     """
     model.train()
     train_loss = 0
+    total_samples = 0  # Track total number of sequences
 
     train_step_pbar = tqdm(train_loader, desc="Training", total=len(train_loader), leave=False)
     for batch in train_step_pbar:
@@ -114,7 +115,9 @@ def train_epoch(model, revin, train_loader, optimizer, criterion, device, patch_
         else:
             raise ValueError(f"Unknown head type: {head_type}. Expected 'regression' or 'classification'.")
 
-    return train_loss / len(train_loader)
+        total_samples += data.size(0)  # Increment by batch size
+
+    return train_loss / total_samples  # Divide by total sequences
 
 
 def val_epoch(model, revin, val_loader, criterion, device, patch_len, stride, head_type):
@@ -123,6 +126,7 @@ def val_epoch(model, revin, val_loader, criterion, device, patch_len, stride, he
     """
     model.eval()
     val_loss = 0
+    total_samples = 0  # Track total number of sequences
 
     val_step_pbar = tqdm(val_loader, desc="Validation", total=len(val_loader), leave=False)
     with torch.no_grad():
@@ -153,7 +157,9 @@ def val_epoch(model, revin, val_loader, criterion, device, patch_len, stride, he
             else:
                 raise ValueError(f"Unknown head type: {head_type}. Expected 'regression' or 'classification'.")
 
-    return val_loss / len(val_loader)
+            total_samples += data.size(0)  # Increment by batch size
+
+    return val_loss / total_samples  # Divide by total sequences
 
 def test_epoch(model, revin, test_loader, criterion, device, patch_len, stride, head_type):
     """
@@ -163,6 +169,7 @@ def test_epoch(model, revin, test_loader, criterion, device, patch_len, stride, 
     test_loss = 0
     all_outputs = []
     all_targets = []
+    total_samples = 0  # Track total number of sequences
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing", total=len(test_loader), leave=False):
@@ -193,6 +200,8 @@ def test_epoch(model, revin, test_loader, criterion, device, patch_len, stride, 
                 all_outputs.append(output)
                 all_targets.append(target)
 
+            total_samples += data.size(0)  # Increment by batch size
+
     all_outputs = torch.cat(all_outputs, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
 
@@ -200,7 +209,7 @@ def test_epoch(model, revin, test_loader, criterion, device, patch_len, stride, 
     if head_type == 'classification':
         test_auroc = calculate_auroc(all_outputs, all_targets)
 
-    return test_loss / len(test_loader), test_auroc
+    return test_loss / total_samples, test_auroc  # Divide by total sequences
 
 def transfer_weights(weights_path, model, exclude_head=True, device='cpu'):
     """
