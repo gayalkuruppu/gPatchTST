@@ -415,8 +415,39 @@ def main():
             torch.save(model.state_dict(), best_model_path)
             print(f"Saved best model based on validation loss at {best_model_path}.")
 
+    # Load the best model for testing
+    test_best_model(device, data_config, model_config, head_type, test_loader, revin, criterion, experiment_name, timestamped_file_name, best_model_path)
+
+    if run:
+        run.stop()
+
+def test_best_model(device, data_config, model_config, head_type, test_loader, revin, criterion, experiment_name, timestamped_file_name, best_model_path):
+    best_model = get_patchTST_model(num_variates=data_config['n_vars'],
+                                    forecast_length=model_config['target_dim'],
+                                    patch_len=model_config['patch_length'],
+                                    stride=model_config['stride'],
+                                    num_patch=(model_config['seq_len'] - model_config['patch_length']) // model_config['stride'] + 1,
+                                    n_layers=model_config['num_layers'],
+                                    d_model=model_config['d_model'],
+                                    n_heads=model_config['num_heads'],
+                                    shared_embedding=model_config['shared_embedding'],
+                                    d_ff=model_config['d_ff'],
+                                    norm=model_config['norm'],
+                                    attn_dropout=model_config['attn_dropout'],
+                                    dropout=model_config['dropout'],
+                                    activation=model_config['activation'],
+                                    res_attention=model_config['res_attention'],
+                                    pe=model_config['pe'],
+                                    learn_pe=model_config['learn_pe'],
+                                    head_dropout=model_config['head_dropout'],
+                                    head_type=head_type,
+                                    use_cls_token=model_config['use_cls_token'],
+                                ).to(device)
+    best_model.load_state_dict(torch.load(best_model_path))
+    print(f"Loaded best model from {best_model_path} for testing.")
+
     # Test the model and log results
-    test_loss, test_auroc = test_epoch(model, revin, test_loader, criterion, device, 
+    test_loss, test_auroc = test_epoch(best_model, revin, test_loader, criterion, device, 
                                        model_config['patch_length'], model_config['stride'], 
                                        head_type)
     print(f"Test Loss: {test_loss:.4f}")
@@ -432,8 +463,6 @@ def main():
             log_file.write(f"Test AUROC: {test_auroc:.4f}\n")
     print(f"Test results saved to {log_file_path}")
 
-    if run:
-        run.stop()
 
 def extract_pretrain_checkpoint_configs(checkpoint):
     # checkpoint = '/home/gayal/ssl-project/gpatchTST/saved_models/pretrain/tuhab_pretrain_tuab_with_cls_token/TUH-101/2025-04-17_21-01-03/checkpoint_epoch_100.pth'
@@ -455,17 +484,20 @@ def extract_pretrain_checkpoint_configs(checkpoint):
 
     checkpoint_name = f"pretrain_seq_len_{seq_len}_patch_length_{patch_length}_stride_{stride}"
 
-    return checkpoint_name
+    basename = os.path.basename(checkpoint)
+    pretrain_checkpoint_num = basename.split('.pth')[0].split('_')[-1]
+
+    return checkpoint_name, pretrain_checkpoint_num
 
 def create_experiment_directory(model_config, checkpoint, neptune_config, neptune_enabled, run):
     experiment_name = neptune_config['experiment_name']
-    pretrain_chckpnt_name = extract_pretrain_checkpoint_configs(checkpoint)
+    pretrain_chckpnt_name, pretrain_checkpoint_num = extract_pretrain_checkpoint_configs(checkpoint)
 
     if neptune_enabled:
         experiment_id = run["sys/id"].fetch()
-        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, str(experiment_id), datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, pretrain_checkpoint_num, str(experiment_id), datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     else:
-        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, pretrain_checkpoint_num, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
 
     if not os.path.exists(timestamped_file_name):
         os.makedirs(timestamped_file_name)

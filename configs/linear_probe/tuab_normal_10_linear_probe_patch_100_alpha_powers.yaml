@@ -1,10 +1,10 @@
 data:
-  root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed'
+  root_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_normal_10_val'
   data_path: ''
-  csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed/file_lengths_map.csv'
-  metadata_csv_path: '/home/gayal/ssl-project/gpatchTST/tuhab_patient_metadata_ds.csv'
-  metadata_dict_path: '/home/gayal/ssl-project/gpatchTST/preprocessing/outputs/alpha_power_tuab_dict.pkl'
-  batch_size: 512
+  csv_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_normal_10_val/file_lengths_map.csv'
+  metadata_csv_path: '/mnt/ssd_4tb_0/data/tuhab_patient_metadata_ds.csv'
+  metadata_dict_path: '/home/gayal/ssl-project/gpatchTST/preprocessing/outputs/alpha_power_tuab_normal_dict.pkl'
+  batch_size: 64
   num_workers: 8
   dl_seed: 0
   prefetch_factor: 4
@@ -50,7 +50,7 @@ model:
 
 train:
   num_epochs: 20
-  learning_rate: 2e-4
+  learning_rate: 1e-2
   weight_decay: 0
   scheduler: 'cosine'
   val_interval_epochs: 1
@@ -58,4 +58,4 @@ train:
 neptune:
   enabled: True
   project: 'gayalkuruppu/ssl-eval'
-  experiment_name: 'tuab_linear_probe_patch_100'
+  experiment_name: 'tuab_normal_10_val_linear_probe_patch_100'
