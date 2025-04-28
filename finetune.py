@@ -17,6 +17,8 @@ import shutil
 from utils.mask_utils import create_patches
 import neptune
 from sklearn.metrics import roc_auc_score
+import random
+import numpy as np
 
 def calculate_auroc(output, target):
     """
@@ -244,7 +246,7 @@ def get_dataloaders(data_config, model_config):
     """
     Get the appropriate data loaders based on the configuration.
     """
-    if data_config['dataloader']=='tuab_alpha_powers':
+    if data_config['dataloader'] == 'tuab_alpha_powers':
         return get_tuab_alpha_dataloaders(
             data_config['root_path'],
             data_config['data_path'],
@@ -277,11 +279,24 @@ def get_dataloaders(data_config, model_config):
             seed=data_config['dl_seed'],
         )
 
+def set_seed(seed):
+    """
+    Set the random seed for reproducibility.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to: {seed}")
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Linear probing or finetuning script for PatchTST.")
     parser.add_argument('--config', type=str, help="Path to the configuration file.", default='configs/linear_probe/tuab_linear_probe_patch_100.yaml')
     parser.add_argument('--checkpoint', type=str, help="Path to the pretrained checkpoint.", default='/home/gayal/ssl-project/gpatchTST/saved_models/pretrain/tuhab_pretrain_tuab_with_cls_token/TUH-101/2025-04-17_21-01-03/checkpoint_epoch_100.pth')
+    parser.add_argument('--seed', type=int, help="Random seed for reproducibility.", default=42)
     args = parser.parse_args()
 
     # Get available device
@@ -299,9 +314,9 @@ def main():
     neptune_enabled = neptune_config['enabled']
     
     head_type = model_config['head_type']
-    if head_type=='regression':
+    if head_type == 'regression':
         assert model_config['target_dim'] == 1, "Regression head type requires target_dim to be 1."
-    elif head_type=='classification':
+    elif head_type == 'classification':
         print("Number of classes:", model_config['target_dim'])
         assert model_config['target_dim'] > 0, "Classification head type requires target_dim to be greater than 0."
 
@@ -309,6 +324,11 @@ def main():
     run = None
     if neptune_enabled:
         run = init_neptune(config)
+
+    # Set random seed for reproducibility
+    set_seed(args.seed)
+
+    data_config['dl_seed'] = args.seed
 
     # Create data loaders
     train_loader, val_loader, test_loader = get_dataloaders(data_config, model_config)
@@ -382,7 +402,9 @@ def main():
         os.makedirs(model_config['save_path'])
 
     # Create a folder with the current date and time
-    experiment_name, timestamped_file_name = create_experiment_directory(model_config, args.checkpoint, neptune_config, neptune_enabled, run)
+    experiment_name, timestamped_file_name = create_experiment_directory(
+        model_config, args.checkpoint, neptune_config, neptune_enabled, run, args.seed
+    )
 
     # Save a copy of the configuration file for reproducibility
     config_backup_path = os.path.join(timestamped_file_name, os.path.basename(config_file_path))
@@ -498,19 +520,34 @@ def extract_pretrain_checkpoint_configs(checkpoint):
 
     return checkpoint_name, pretrain_checkpoint_num
 
-def create_experiment_directory(model_config, checkpoint, neptune_config, neptune_enabled, run):
+def create_experiment_directory(model_config, checkpoint, neptune_config, neptune_enabled, run, seed):
     experiment_name = neptune_config['experiment_name']
     pretrain_chckpnt_name, pretrain_checkpoint_num = extract_pretrain_checkpoint_configs(checkpoint)
 
     if neptune_enabled:
         experiment_id = run["sys/id"].fetch()
-        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, pretrain_checkpoint_num, str(experiment_id), datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        timestamped_file_name = os.path.join(
+            model_config['save_path'], 
+            experiment_name,
+            pretrain_chckpnt_name,
+            f"seed_{seed}", 
+            pretrain_checkpoint_num, 
+            str(experiment_id), 
+            datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        )
     else:
-        timestamped_file_name = os.path.join(model_config['save_path'], experiment_name, pretrain_chckpnt_name, pretrain_checkpoint_num, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        timestamped_file_name = os.path.join(
+            model_config['save_path'], 
+            experiment_name, 
+            pretrain_chckpnt_name, 
+            f"seed_{seed}", 
+            pretrain_checkpoint_num, 
+            datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        )
 
     if not os.path.exists(timestamped_file_name):
         os.makedirs(timestamped_file_name)
-    return experiment_name,timestamped_file_name
+    return experiment_name, timestamped_file_name
 
 def get_loss_function(head_type):
     if head_type == 'regression':

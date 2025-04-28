@@ -36,8 +36,8 @@ class TUH_Dataset(Dataset):
             self.label_len = size[1] # Not used
             self.pred_len = size[2]
         
-        # Path for saving/loading patient splits
-        self.splits_path = os.path.join(root_path, "tuh_patient_splits.pkl")
+        # Path for saving/loading patient splits with seed
+        self.splits_path = os.path.join(self.root_path, f"tuh_patient_splits_seed_{self.seed}.pkl")
         
         # Load file lengths from CSV
         self.file_lengths = self._load_file_lengths()
