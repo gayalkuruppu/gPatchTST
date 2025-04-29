@@ -1,5 +1,7 @@
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from PIL import Image
+from torchvision.io import read_image
 import torch
 import os
 import numpy as np
@@ -303,6 +305,92 @@ class TUAB_Dataset_ALPHA(TUH_Dataset):
         return data
 
 # class MPI_LEMON_ALPHA()
+import os
+import random
+import pickle
+from collections import defaultdict
+from torch.utils.data import Dataset, DataLoader
+
+def create_splits(data_dir, seed=42, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
+    splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
+    
+    if not os.path.exists(splits_path):
+        print(f"Creating new patient splits...")
+        random.seed(seed)
+
+        # Group files by patient
+        file_groups = defaultdict(list)
+        for fname in os.listdir(data_dir):
+            if fname.endswith('.png'):
+                patient_key = fname.split('_s')[0]  # 'aaaaapto'
+                file_groups[patient_key].append(fname)
+
+        all_patients = list(file_groups.keys())
+        random.shuffle(all_patients)
+
+        n_total = len(all_patients)
+        n_train = int(train_ratio * n_total)
+        n_val = int(val_ratio * n_total)
+        n_test = n_total - n_train - n_val
+
+        train_patients = all_patients[:n_train]
+        val_patients = all_patients[n_train:n_train+n_val]
+        test_patients = all_patients[n_train+n_val:]
+
+        splits = {'train': train_patients, 'val': val_patients, 'test': test_patients}
+        
+        with open(splits_path, 'wb') as f:
+            pickle.dump(splits, f)
+        print(f"Saved patient splits to {splits_path}")
+    else:
+        print(f"Patient splits already exist at {splits_path}")
+
+def load_split(data_dir, seed=42, split="train"):
+    splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
+    
+    if not os.path.exists(splits_path):
+        raise FileNotFoundError(f"Split file {splits_path} not found. Please create splits first.")
+
+    with open(splits_path, 'rb') as f:
+        splits = pickle.load(f)
+    if split not in splits:
+        raise ValueError(f"Split '{split}' not found in saved splits.")
+    
+    selected_patients = splits[split]
+    return selected_patients
+
+
+class TUH_Scalograms_Dataset(Dataset):
+    def __init__(self, data_dir, split="train", seed=42, transform=None):
+        self.data_dir = data_dir
+        self.split = split
+        self.seed = seed
+        self.transform = transform
+
+        # Make sure splits exist
+        create_splits(self.data_dir, seed=self.seed)
+
+        # Load only the requested split
+        selected_patients = load_split(self.data_dir, seed=self.seed, split=self.split)
+
+        # Find all files for selected patients
+        all_files = os.listdir(self.data_dir)
+        self.file_list = [
+            fname for fname in all_files
+            if fname.endswith('.png') and any(fname.startswith(patient) for patient in selected_patients)
+        ]
+
+    def __len__(self):
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        file_path = os.path.join(self.data_dir, self.file_list[idx])
+        image = read_image(file_path).float() / 255.0  # Normalized to [0, 1]
+
+        if self.transform:
+            image = self.transform(image)
+        return image
+        # return file_path
 
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 
@@ -361,6 +449,27 @@ def get_tuab_alpha_dataloaders(root_path, data_path, csv_path, alpha_dict_path=N
                                      size=size, split='val', seed=seed)
     test_dataset = TUAB_Dataset_ALPHA(root_path, data_path, csv_path, alpha_dict_path=alpha_dict_path,
                                       size=size, split='test', seed=seed)
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, prefetch_factor=prefetch_factor,
+                              pin_memory=pin_memory, drop_last=drop_last)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, prefetch_factor=prefetch_factor,
+                            pin_memory=pin_memory, drop_last=drop_last)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                             num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
+    
+    return train_loader, val_loader, test_loader
+
+
+def get_tuab_scalogram_dls(data_dir, batch_size=64, num_workers=4, prefetch_factor=1, 
+                            pin_memory=False, drop_last=False, seed=42):
+    # Create datasets
+    train_dataset = TUH_Scalograms_Dataset(data_dir, split='train', seed=seed)
+    val_dataset = TUH_Scalograms_Dataset(data_dir, split='val', seed=seed)
+    test_dataset = TUH_Scalograms_Dataset(data_dir, split='test', seed=seed)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
