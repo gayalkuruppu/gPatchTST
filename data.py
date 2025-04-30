@@ -321,11 +321,12 @@ def create_splits(data_dir, seed=42, train_ratio=0.7, val_ratio=0.15, test_ratio
         # Group files by patient
         file_groups = defaultdict(list)
         for fname in os.listdir(data_dir):
-            if fname.endswith('.png'):
+            if fname.endswith('.npy'):
                 patient_key = fname.split('_s')[0]  # 'aaaaapto'
                 file_groups[patient_key].append(fname)
 
-        all_patients = list(file_groups.keys())
+        # Sort patient keys for reproducibility
+        all_patients = sorted(file_groups.keys())
         random.shuffle(all_patients)
 
         n_total = len(all_patients)
@@ -361,11 +362,10 @@ def load_split(data_dir, seed=42, split="train"):
 
 
 class TUH_Scalograms_Dataset(Dataset):
-    def __init__(self, data_dir, split="train", seed=42, transform=None):
+    def __init__(self, data_dir, split="train", seed=42):
         self.data_dir = data_dir
         self.split = split
         self.seed = seed
-        self.transform = transform
 
         # Make sure splits exist
         create_splits(self.data_dir, seed=self.seed)
@@ -377,7 +377,7 @@ class TUH_Scalograms_Dataset(Dataset):
         all_files = os.listdir(self.data_dir)
         self.file_list = [
             fname for fname in all_files
-            if fname.endswith('.png') and any(fname.startswith(patient) for patient in selected_patients)
+            if fname.endswith('.npy') and any(fname.startswith(patient) for patient in selected_patients)
         ]
 
     def __len__(self):
@@ -385,12 +385,9 @@ class TUH_Scalograms_Dataset(Dataset):
     
     def __getitem__(self, idx):
         file_path = os.path.join(self.data_dir, self.file_list[idx])
-        image = read_image(file_path).float() / 255.0  # Normalized to [0, 1]
+        data = np.load(file_path)
 
-        if self.transform:
-            image = self.transform(image)
-        return image
-        # return file_path
+        return {"filename": self.file_list[idx], "data": data}
 
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 
