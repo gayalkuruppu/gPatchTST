@@ -1,14 +1,14 @@
 data:
-  data_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_normal_10_val_scalograms_10_sec'
-  batch_size: 1
+  data_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_normal_10_val_scalograms_5_sec'
+  batch_size: 8
   num_workers: 8
   prefetch_factor: 4
   pin_memory: True
   drop_last: True
 
 model:
-  image_size: (250, 1000) # (70, 500)
-  patch_size: (25, 10) # (7, 10)
+  image_size: (70, 500)
+  patch_size: (7, 10)
   num_classes: 1000
   dim: 1024 #d_model
   depth: 6
@@ -30,13 +30,13 @@ model:
   checkpoint_interval: 0.1 # num_epochs or percentage
 
 train:
-  num_epochs: 20
-  learning_rate: 1e-4
+  num_epochs: 100
+  learning_rate: 1e-3
   weight_decay: 0
   scheduler: 'cosine'
   step_size: 10
   gamma: 0.1
-  val_interval_epochs: 1
+  val_interval_epochs: 10
 
   # masking
   time_mask_consecutive_min: 1
@@ -47,6 +47,6 @@ train:
   freq_mask_p: 0.10
 
 neptune:
-  enabled: False
+  enabled: True
   project: 'gayalkuruppu/tuh-ssl-test'
-  experiment_name: '10_val_normal_dataset'
+  experiment_name: '10_val_normal_dataset_spectrogram_5_sec'

@@ -80,8 +80,55 @@ class Transformer(nn.Module):
 
         return self.norm(x)
 
+
 class ViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
+    def __init__(self, *, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, 
+                 dim_head = 64, dropout = 0., emb_dropout = 0., head_type = 'pretrain'):
+        super().__init__()
+        image_height, image_width = pair(image_size)
+        patch_height, patch_width = pair(patch_size)
+
+        assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+
+        num_patches = (image_height // patch_height) * (image_width // patch_width)
+        patch_dim = channels * patch_height * patch_width
+        print(f"patch dim: {patch_dim}")
+
+        self.backbone = ViTEncoder(
+            image_size = image_size,
+            patch_size = patch_size,
+            dim = dim,
+            depth = depth,
+            heads = heads,
+            mlp_dim = mlp_dim,
+            pool = pool,
+            channels = channels,
+            dim_head = dim_head,
+            dropout = dropout,
+            emb_dropout = emb_dropout,
+        )
+
+        assert head_type in ['pretrain', 'regression', 'classification'], 'head type should be either pretrain, prediction, or regression'
+
+        self.head_type = head_type
+
+        if head_type == 'pretrain':
+            self.head = PretrainHead(
+                d_model = dim,
+                patch_len = patch_dim,
+                dropout = dropout,
+                use_cls_token = pool == 'cls'
+            )
+
+    def forward(self, img):
+        x = self.backbone(img) # [bs x (num_patches+1) x d_model]
+        x = self.head(x) # [bs x num_patches x patch_len] or [bs x (num_patches+1) x patch_len]
+
+        return x
+
+
+class ViTEncoder(nn.Module):
+    def __init__(self, *, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
@@ -106,12 +153,9 @@ class ViT(nn.Module):
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
 
         self.pool = pool
-        self.to_latent = nn.Identity()
-
-        self.mlp_head = nn.Linear(dim, num_classes)
 
     def forward(self, img):
-        x = self.to_patch_embedding(img)
+        x = self.to_patch_embedding(img) 
         b, n, _ = x.shape
 
         cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
@@ -121,7 +165,27 @@ class ViT(nn.Module):
 
         x = self.transformer(x)
 
-        x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
+        # x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
 
-        x = self.to_latent(x)
-        return self.mlp_head(x)
+        return x # [bs x (num_patches+1 x d_model)]
+
+
+class PretrainHead(nn.Module):
+    def __init__(self, d_model, patch_len, dropout, use_cls_token=False):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        self.linear = nn.Linear(d_model, patch_len)
+        self.use_cls_token = use_cls_token
+
+    def forward(self, x):
+        """
+        x: tensor [bs x d_model x (num_patch or num_patch+1)]
+        output: tensor [bs x num_patch x patch_len]
+        """
+        # x = x.transpose(2, 3)                     # [bs x (num_patches+1) x d_model]
+        x = self.dropout(x)                      # [bs x nvars x (num_patch or num_patch+1) x d_model]
+        x = self.linear(x)                       # [bs x nvars x (num_patch or num_patch+1) x patch_len]
+        # x = x.permute(0, 2, 1, 3)                # [bs x (num_patch or num_patch+1) x nvars x patch_len]
+        if self.use_cls_token:
+            x = x[:, 1:, :]                   # Remove CLS token
+        return x

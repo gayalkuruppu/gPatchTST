@@ -35,28 +35,43 @@ def get_patchTST_model(num_variates, forecast_length, patch_len, stride, num_pat
     return model
 
 
-def get_ViT_MAE_model(image_size=256, patch_size=32, num_classes=1000, dim=1024, depth=6, heads=8, mlp_dim=2048,
-                      masking_ratio=0.75, decoder_dim=512, decoder_depth=6):
+# def get_ViT_MAE_model(image_size=256, patch_size=32, num_classes=1000, dim=1024, depth=6, heads=8, mlp_dim=2048,
+#                       masking_ratio=0.75, decoder_dim=512, decoder_depth=6):
+#     v = ViT(
+#         image_size=image_size,
+#         patch_size=patch_size,
+#         num_classes=num_classes,
+#         dim=dim,
+#         depth=depth,
+#         heads=heads,
+#         mlp_dim=mlp_dim,
+#         pool='cls',
+#         channels=1,
+#     )
+
+#     mae = MAE(
+#         encoder=v,
+#         masking_ratio=masking_ratio,   # the paper recommended 75% masked patches
+#         decoder_dim=decoder_dim,      # paper showed good results with just 512
+#         decoder_depth=decoder_depth       # anywhere from 1 to 8
+#     )
+
+#     return mae
+def get_ViT_MAE_model(image_size=256, patch_size=32, dim=1024, depth=6, heads=8, mlp_dim=2048,
+                      decoder_dim=512, decoder_depth=6, head_type='pretrain'):
     v = ViT(
         image_size=image_size,
         patch_size=patch_size,
-        num_classes=num_classes,
         dim=dim,
         depth=depth,
         heads=heads,
         mlp_dim=mlp_dim,
         pool='cls',
         channels=1,
+        head_type='pretrain'
     )
 
-    mae = MAE(
-        encoder=v,
-        masking_ratio=masking_ratio,   # the paper recommended 75% masked patches
-        decoder_dim=decoder_dim,      # paper showed good results with just 512
-        decoder_depth=decoder_depth       # anywhere from 1 to 8
-    )
-
-    return mae
+    return v
 
 
 def get_pretrain_model(model_name, model_config, data_config): # TODO remove data_config
@@ -89,14 +104,14 @@ def get_pretrain_model(model_name, model_config, data_config): # TODO remove dat
         model = get_ViT_MAE_model(
             image_size=model_config['image_size'], 
             patch_size=model_config['patch_size'], 
-            num_classes=model_config['num_classes'], 
             dim=model_config['dim'], 
             depth=model_config['depth'], 
             heads=model_config['heads'], 
             mlp_dim=model_config['mlp_dim'], 
-            masking_ratio=model_config['masking_ratio'], 
+            # masking_ratio=model_config['masking_ratio'], 
             decoder_dim=model_config['decoder_dim'], 
-            decoder_depth=model_config['decoder_depth']
+            decoder_depth=model_config['decoder_depth'],
+            head_type=model_config['head_type'],
         )
     else:
         raise ValueError(f"Unknown model name: {model_name}")
