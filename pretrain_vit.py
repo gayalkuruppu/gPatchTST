@@ -10,8 +10,8 @@ import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-from models.patchtst.layers.revin import RevIN
 from einops import rearrange
+import matplotlib.pyplot as plt
 
 from get_models import get_pretrain_model
 from dataloaders.dataloaders import get_dataloaders
@@ -19,8 +19,10 @@ from configs import Config
 from utils.utils import init_neptune
 from utils.pretrain_utils import load_checkpoint
 from utils.mask_utils import fixed_mask_inputs
+from models.patchtst.layers.revin import RevIN
 # Initialize model
 
+DEBUG = True
 
 def plot_sample_reconstruction(model, sample, device, model_config, save_path, epoch):
     model.eval()
@@ -32,20 +34,17 @@ def plot_sample_reconstruction(model, sample, device, model_config, save_path, e
     input_patches, freq_patches, time_patches = create_patches_2D(data, model_config)
     mask = create_mask_2D(input_patches, model_config)
 
-    masked_patches = apply_mask(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
-    masked_patches = rearrange(masked_patches, 'b c fp tp fs ts -> b c (fp fs) (tp ts)')
+    masked_patches = process_masked_patches_2D(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
     print(masked_patches.shape)
     with torch.no_grad():
         predicted_patches = model(masked_patches)
         print(f"predicted_patches shape: {predicted_patches.shape}")
 
-    reconstruction = rearrange(predicted_patches, 'b (fp tp) (fs ts) -> b fp tp fs ts', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch).unsqueeze(1)
-    masked_reconstruction = apply_inv_mask(reconstruction, mask, masked_value=0)
-    masked_reconstruction = rearrange(masked_reconstruction, 'b c fp tp fs ts -> b c (fp fs) (tp ts)', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch)
+    # reconstruction = rearrange(predicted_patches, 'b (fp tp) (fs ts) -> b fp tp fs ts', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch).unsqueeze(1)
+    # masked_reconstruction = apply_inv_mask(reconstruction, mask, masked_value=0)
+    predicted_masked_regions = process_output_patches_2D(predicted_patches, mask, freq_patches, time_patches, fs_patch, ts_patch, masked_value=0)
+    masked_reconstruction = rearrange(predicted_masked_regions, 'b c fp tp fs ts -> b c (fp fs) (tp ts)', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch)
     os.makedirs(save_path, exist_ok=True)
-
-    # plot the original and reconstructed patches side by side
-    import matplotlib.pyplot as plt
 
     fig, axs = plt.subplots(3, 1, figsize=(10, 10))
     axs[0].imshow(data[0, 0].cpu().numpy(), cmap='gray')
@@ -61,6 +60,26 @@ def plot_sample_reconstruction(model, sample, device, model_config, save_path, e
     plt.close(fig)
 
     return
+
+
+def debug_plot(masked_patches, target_patches, predicted_masked_regions, outputs, mask, split='train'):
+    # Plot
+    # masked_patches = rearrange(masked_patches, 'b c (fp fs) (tp ts) -> b c fp tp fs ts', fp=mask.shape[2], tp=mask.shape[3], fs=target_patches.shape[4], ts=target_patches.shape[5])
+    target_patches = rearrange(target_patches, 'b c fp tp fs ts -> b c (fp fs) (tp ts)', fp=mask.shape[2], tp=mask.shape[3], fs=target_patches.shape[4], ts=target_patches.shape[5])
+    predicted_masked_regions = rearrange(predicted_masked_regions, 'b c fp tp fs ts -> b c (fp fs) (tp ts)', fp=mask.shape[2], tp=mask.shape[3], fs=predicted_masked_regions.shape[4], ts=predicted_masked_regions.shape[5])
+    outputs = outputs.permute(0, 2, 1)
+    fig, axs = plt.subplots(4, 1, figsize=(10, 10))
+    axs[0].imshow(masked_patches[0, 0].cpu().numpy(), cmap='gray')
+    axs[0].set_title(f'{split} - Masked Input')
+    axs[1].imshow(target_patches[0, 0].cpu().numpy(), cmap='gray')
+    axs[1].set_title(f'{split} - Target Patches')
+    axs[2].imshow(predicted_masked_regions[0, 0].cpu().detach().numpy(), cmap='gray')
+    axs[2].set_title(f'{split} - Predicted Masked Regions')
+    axs[3].imshow(outputs[0].cpu().detach().numpy(), cmap='gray')
+    axs[3].set_title(f'{split} - Model Output')
+    plt.tight_layout()
+    plt.savefig(f'{split}_debug_plot.png')
+    plt.close(fig)
 
 def train_epoch(device, model_config, neptune_enabled, run, timestamped_file_name, train_loader, train_sample, model, revin, optimizer, scheduler, criterion, epoch):
     model.train()
@@ -87,16 +106,18 @@ def train_epoch(device, model_config, neptune_enabled, run, timestamped_file_nam
         fs_patch, ts_patch = model_config['patch_size']
         mask = create_mask_2D(input_patches, model_config)
 
-        masked_patches = apply_mask(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
-        masked_patches = rearrange(masked_patches, 'b c fp tp fs ts -> b c (fp fs) (tp ts)')
+        masked_patches = process_masked_patches_2D(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
         target_patches = apply_inv_mask(input_patches, mask, masked_value=0)
 
         if revin:
             inputs = revin(masked_patches, mode='norm')
         outputs = model(masked_patches)
 
-        outputs = rearrange(outputs, 'b (fp tp) (fs ts) -> b fp tp fs ts', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch).unsqueeze(1)
-        predicted_masked_regions = apply_inv_mask(outputs, mask, masked_value=0)
+        predicted_masked_regions = process_output_patches_2D(outputs, mask, freq_patches, time_patches, fs_patch, ts_patch, masked_value=0)
+        
+        if DEBUG:
+            debug_plot(masked_patches, target_patches, predicted_masked_regions, outputs, mask, split='train')
+
         loss = criterion(predicted_masked_regions, target_patches)
         
         # Backward pass
@@ -140,8 +161,7 @@ def val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name,
             fs_patch, ts_patch = model_config['patch_size']
             mask = create_mask_2D(input_patches, model_config)
 
-            masked_patches = apply_mask(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
-            masked_patches = rearrange(masked_patches, 'b c fp tp fs ts -> b c (fp fs) (tp ts)')
+            masked_patches = process_masked_patches_2D(input_patches, mask, masked_value=0) # [bs x n_chn x freq_patches x time_patches x fs_patch x ts_patch]
             target_patches = apply_inv_mask(input_patches, mask, masked_value=0)
 
             if revin:
@@ -149,8 +169,7 @@ def val_epoch(device, model_config, neptune_enabled, run, timestamped_file_name,
 
             outputs = model(masked_patches)
 
-            outputs = rearrange(outputs, 'b (fp tp) (fs ts) -> b fp tp fs ts', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch).unsqueeze(1)
-            predicted_masked_regions = apply_inv_mask(outputs, mask, masked_value=0)
+            predicted_masked_regions = process_output_patches_2D(outputs, mask, freq_patches, time_patches, fs_patch, ts_patch, masked_value=0)
             loss = criterion(predicted_masked_regions, target_patches)
 
             val_loss += loss.item()
@@ -247,6 +266,22 @@ def apply_inv_mask(patches, mask, masked_value=0):
     masked_patches[~mask] = masked_value
 
     return masked_patches
+
+def process_masked_patches_2D(input_patches, mask, masked_value=0):
+    """
+    Applies a mask to 2D patches and rearranges them for model input.
+    """
+    masked_patches = apply_mask(input_patches, mask, masked_value=masked_value)
+    masked_patches = rearrange(masked_patches, 'b c fp tp fs ts -> b c (fp fs) (tp ts)')
+    return masked_patches
+
+def process_output_patches_2D(outputs, mask, freq_patches, time_patches, fs_patch, ts_patch, masked_value=0):
+    """
+    Rearranges the model outputs and applies the inverse mask to reconstruct the masked regions.
+    """
+    outputs = rearrange(outputs, 'b (fp tp) (fs ts) -> b fp tp fs ts', fp=freq_patches, tp=time_patches, fs=fs_patch, ts=ts_patch).unsqueeze(1)
+    predicted_masked_regions = apply_inv_mask(outputs, mask, masked_value=masked_value)
+    return predicted_masked_regions
 
 def main():
     # Parse command-line arguments

@@ -91,7 +91,7 @@ class ViT(nn.Module):
         assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
 
         num_patches = (image_height // patch_height) * (image_width // patch_width)
-        patch_dim = channels * patch_height * patch_width
+        patch_dim = channels * patch_height * patch_width # pixels_per_patch # handle channels
         print(f"patch dim: {patch_dim}")
 
         self.backbone = ViTEncoder(
@@ -115,7 +115,7 @@ class ViT(nn.Module):
         if head_type == 'pretrain':
             self.head = PretrainHead(
                 d_model = dim,
-                patch_len = patch_dim,
+                patch_len = patch_dim, # pixels_per_patch
                 dropout = dropout,
                 use_cls_token = pool == 'cls'
             )
@@ -182,10 +182,8 @@ class PretrainHead(nn.Module):
         x: tensor [bs x d_model x (num_patch or num_patch+1)]
         output: tensor [bs x num_patch x patch_len]
         """
-        # x = x.transpose(2, 3)                     # [bs x (num_patches+1) x d_model]
-        x = self.dropout(x)                      # [bs x nvars x (num_patch or num_patch+1) x d_model]
-        x = self.linear(x)                       # [bs x nvars x (num_patch or num_patch+1) x patch_len]
-        # x = x.permute(0, 2, 1, 3)                # [bs x (num_patch or num_patch+1) x nvars x patch_len]
+        x = self.dropout(x)                      # [bs x (num_patch or num_patch+1) x d_model]
+        x = self.linear(x)                       # [bs x (num_patch or num_patch+1) x patch_len] # patch_len = pixels_per_patch
         if self.use_cls_token:
             x = x[:, 1:, :]                   # Remove CLS token
         return x
