@@ -309,10 +309,12 @@ import os
 import random
 import pickle
 from collections import defaultdict
-from torch.utils.data import Dataset, DataLoader
 
 def create_splits(data_dir, seed=42, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
-    splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
+    if type(data_dir)==list:
+        splits_path = os.path.join(data_dir[0], f"patient_splits_seed_{seed}.pkl")
+    else:
+        splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
     
     if not os.path.exists(splits_path):
         print(f"Creating new patient splits...")
@@ -320,10 +322,13 @@ def create_splits(data_dir, seed=42, train_ratio=0.7, val_ratio=0.15, test_ratio
 
         # Group files by patient
         file_groups = defaultdict(list)
-        for fname in os.listdir(data_dir):
-            if fname.endswith('.npy'):
-                patient_key = fname.split('_s')[0]  # 'aaaaapto'
-                file_groups[patient_key].append(fname)
+        if type(data_dir)==str:
+            data_dir = [data_dir]
+        for dir in data_dir:
+            for fname in os.listdir(dir):
+                if fname.endswith('.npy'):
+                    patient_key = fname.split('_s')[0]  # 'aaaaapto'
+                    file_groups[patient_key].append(fname)
 
         # Sort patient keys for reproducibility
         all_patients = sorted(file_groups.keys())
@@ -347,7 +352,10 @@ def create_splits(data_dir, seed=42, train_ratio=0.7, val_ratio=0.15, test_ratio
         print(f"Patient splits already exist at {splits_path}")
 
 def load_split(data_dir, seed=42, split="train"):
-    splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
+    if type(data_dir)==list:
+        splits_path = os.path.join(data_dir[0], f"patient_splits_seed_{seed}.pkl")
+    else:
+        splits_path = os.path.join(data_dir, f"patient_splits_seed_{seed}.pkl")
     
     if not os.path.exists(splits_path):
         raise FileNotFoundError(f"Split file {splits_path} not found. Please create splits first.")
@@ -366,6 +374,7 @@ class TUH_Scalograms_Dataset(Dataset):
         self.data_dir = data_dir
         self.split = split
         self.seed = seed
+        self.single_data_dir = type(data_dir) == str
 
         # Make sure splits exist
         create_splits(self.data_dir, seed=self.seed)
@@ -374,7 +383,13 @@ class TUH_Scalograms_Dataset(Dataset):
         selected_patients = load_split(self.data_dir, seed=self.seed, split=self.split)
 
         # Find all files for selected patients
-        all_files = os.listdir(self.data_dir)
+        all_files = []
+        if type(self.data_dir)==list:
+            for dir in self.data_dir:
+                all_files += os.listdir(dir)
+        else:
+            all_files = os.listdir(self.data_dir)
+
         self.file_list = [
             fname for fname in all_files
             if fname.endswith('.npy') and any(fname.startswith(patient) for patient in selected_patients)
@@ -384,10 +399,88 @@ class TUH_Scalograms_Dataset(Dataset):
         return len(self.file_list)
     
     def __getitem__(self, idx):
-        file_path = os.path.join(self.data_dir, self.file_list[idx])
+        if self.single_data_dir:
+            file_path = os.path.join(self.data_dir, self.file_list[idx])
+        else:
+            file_path = os.path.join(self.data_dir[0], self.file_list[idx])
+            if not os.path.exists(file_path):
+                file_path = os.path.join(self.data_dir[1], self.file_list[idx])
+
         data = np.load(file_path)
 
         return {"filename": self.file_list[idx], "data": data}
+
+
+import torch
+from torchvision import datasets, transforms
+# transform = transforms.Compose([
+#     transforms.ToTensor(),  # Converts HWC [0–255] to CHW [0–1]
+# ])
+
+import os
+from PIL import Image
+import torchvision.transforms as transforms
+import random
+from sklearn.model_selection import train_test_split
+
+class CelebAFolderDataset(Dataset):
+    def __init__(self, image_paths, transform=None):
+        self.image_paths = image_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        image = Image.open(img_path).convert('RGB')
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image
+
+
+def get_celeba_dataloaders(root_path, batch_size=64, num_workers=4, seed=42, 
+                           prefetch_factor=1, pin_memory=False, drop_last=False):
+    imagenet_mean = np.array([0.485, 0.456, 0.406])
+    imagenet_std = np.array([0.229, 0.224, 0.225])
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        # transforms.CenterCrop(178),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=imagenet_mean, std=imagenet_std),
+    ])
+
+    all_images = sorted([
+        os.path.join(root_path, f)
+        for f in os.listdir(root_path)
+        if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+    ])
+
+    random.seed(seed)
+    train_imgs, temp_imgs = train_test_split(all_images, test_size=0.2, random_state=seed)
+    val_imgs, test_imgs = train_test_split(temp_imgs, test_size=0.5, random_state=seed)
+
+    train_ds = CelebAFolderDataset(train_imgs, transform)
+    val_ds = CelebAFolderDataset(val_imgs, transform)
+    test_ds = CelebAFolderDataset(test_imgs, transform)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, 
+                              num_workers=num_workers, prefetch_factor=prefetch_factor,
+                              pin_memory=pin_memory, drop_last=drop_last)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, 
+                            num_workers=num_workers, prefetch_factor=prefetch_factor, 
+                            pin_memory=pin_memory, drop_last=drop_last)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, 
+                             num_workers=num_workers, prefetch_factor=prefetch_factor,
+                             pin_memory=pin_memory, drop_last=drop_last)
+
+    return train_loader, val_loader, test_loader
+
+# # Get a batch and check shape
+# images, _ = next(iter(celeba_loader))
+# print(images.shape)  # [64, 3, 218, 178]
 
 
 def get_tuh_dataloaders(root_path, data_path, csv_path, batch_size=64, num_workers=4, 

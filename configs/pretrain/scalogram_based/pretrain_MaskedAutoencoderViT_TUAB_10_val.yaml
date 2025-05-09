@@ -1,0 +1,58 @@
+data:
+  data_path: '/mnt/ssd_4tb_0/data/tuhab_preprocessed_normal_10_val_scalograms_5_sec'
+  # data_path: 
+  #   - '/mnt/ssd_4tb_0/data/tuhab_preprocessed_scalograms'
+  #   - '/mnt/ssd_4tb_0/data/tuhab_preprocessed_scalograms_new'
+  batch_size: 16
+  num_workers: 8
+  prefetch_factor: 4
+  pin_memory: True
+  drop_last: True
+  dataset_name: 'tuab_scalogram'
+
+model:
+  model_name: 'MaskedAutoencoderViT'
+  image_size: (70, 500)
+  patch_size: (7, 10)
+  # num_classes: 1000
+  dim: 1024 #d_model
+  depth: 6
+  heads: 8
+  decoder_dim: 512
+  decoder_depth: 6
+  decoder_heads: 8
+  mlp_ratio: 4 # d_ff = 4*dim
+  # mlp_dim: 2048 # d_ff
+  pool: 'cls'
+  channels: 1
+
+  head_type: 'pretrain'
+  masking_method: 'tf_random'
+  masking_ratio: (0.5, 0.5) # 0.4
+  # time_masking_ratio: 0.5
+  # freq_masking_ratio: 0.5 # 0.75
+
+  revin: False
+
+  save_path: 'saved_models/pretrain/scalogram_5_sec_10_val_debug'
+  checkpoint_interval: 0.01 # num_epochs or percentage
+
+train:
+  num_epochs: 2
+  learning_rate: 2e-4
+  min_lr: 1e-5
+  weight_decay: 1e-4
+  val_interval_epochs: 1
+
+  # # masking
+  # time_mask_consecutive_min: 1
+  # time_mask_consecutive_max: 20
+  # freq_mask_consecutive_min: 1
+  # freq_mask_consecutive_max: 4
+  # time_mask_p: 0.10
+  # freq_mask_p: 0.10
+
+neptune:
+  enabled: False
+  project: 'gayalkuruppu/tuh-ssl-test'
+  experiment_name: 'MAeViT_TUAB_debug'

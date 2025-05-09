@@ -1,6 +1,8 @@
 from models.patchtst.patchTST import PatchTST
 from models.vit.vit import ViT
 from models.vit.mae import MAE
+from models.vit.vit import ViT_Orig
+from models.models_mae import MaskedAutoencoderViT
 
 import ast
 
@@ -35,30 +37,35 @@ def get_patchTST_model(num_variates, forecast_length, patch_len, stride, num_pat
     return model
 
 
-# def get_ViT_MAE_model(image_size=256, patch_size=32, num_classes=1000, dim=1024, depth=6, heads=8, mlp_dim=2048,
-#                       masking_ratio=0.75, decoder_dim=512, decoder_depth=6):
-#     v = ViT(
-#         image_size=image_size,
-#         patch_size=patch_size,
-#         num_classes=num_classes,
-#         dim=dim,
-#         depth=depth,
-#         heads=heads,
-#         mlp_dim=mlp_dim,
-#         pool='cls',
-#         channels=1,
-#     )
+def get_ViT_MAE_model(image_size=256, patch_size=32, num_classes=1000, dim=1024, depth=6, heads=8, mlp_dim=2048,
+                      masking_ratio=0.75, decoder_dim=512, decoder_depth=6, channels=1, masking_method='random',
+                      freq_masking_ratio=0.2, time_masking_ratio=0.2):
+    v = ViT_Orig(
+        image_size=image_size,
+        patch_size=patch_size,
+        num_classes=num_classes,
+        dim=dim,
+        depth=depth,
+        heads=heads,
+        mlp_dim=mlp_dim,
+        pool='cls',
+        channels=channels,
+    )
 
-#     mae = MAE(
-#         encoder=v,
-#         masking_ratio=masking_ratio,   # the paper recommended 75% masked patches
-#         decoder_dim=decoder_dim,      # paper showed good results with just 512
-#         decoder_depth=decoder_depth       # anywhere from 1 to 8
-#     )
+    mae = MAE(
+        encoder=v,
+        masking_method=masking_method,  # 'tf_random', 'random
+        masking_ratio=masking_ratio,   # the paper recommended 75% masked patches
+        freq_masking_ratio=freq_masking_ratio,
+        time_masking_ratio=time_masking_ratio,
+        decoder_dim=decoder_dim,      # paper showed good results with just 512
+        decoder_depth=decoder_depth       # anywhere from 1 to 8
+    )
 
-#     return mae
-def get_ViT_MAE_model(image_size=256, patch_size=32, dim=1024, depth=6, heads=8, mlp_dim=2048,
-                      decoder_dim=512, decoder_depth=6, head_type='pretrain'):
+    return mae
+
+def get_ViT_model(image_size=256, patch_size=32, dim=1024, depth=6, heads=8, mlp_dim=2048,
+                      decoder_dim=512, decoder_depth=6, channels=1, head_type='pretrain'):
     v = ViT(
         image_size=image_size,
         patch_size=patch_size,
@@ -67,7 +74,7 @@ def get_ViT_MAE_model(image_size=256, patch_size=32, dim=1024, depth=6, heads=8,
         heads=heads,
         mlp_dim=mlp_dim,
         pool='cls',
-        channels=1,
+        channels=channels,
         head_type='pretrain'
     )
 
@@ -98,10 +105,10 @@ def get_pretrain_model(model_name, model_config, data_config): # TODO remove dat
             head_type=model_config['head_type'],
             use_cls_token=model_config['use_cls_token'],
         )
-    elif model_name == 'ViT_MAE':
+    elif model_name == 'ViT':
         model_config['image_size'] = ast.literal_eval(model_config['image_size'])
         model_config['patch_size'] = ast.literal_eval(model_config['patch_size'])
-        model = get_ViT_MAE_model(
+        model = get_ViT_model(
             image_size=model_config['image_size'], 
             patch_size=model_config['patch_size'], 
             dim=model_config['dim'], 
@@ -112,7 +119,47 @@ def get_pretrain_model(model_name, model_config, data_config): # TODO remove dat
             decoder_dim=model_config['decoder_dim'], 
             decoder_depth=model_config['decoder_depth'],
             head_type=model_config['head_type'],
+            channels=model_config['channels'],
         )
+    elif model_name == 'ViT_MAE':
+        model_config['image_size'] = ast.literal_eval(model_config['image_size'])
+        model_config['patch_size'] = ast.literal_eval(model_config['patch_size'])
+        model = get_ViT_MAE_model(
+            image_size=model_config['image_size'], 
+            patch_size=model_config['patch_size'], 
+            dim=model_config['dim'], 
+            depth=model_config['depth'], 
+            heads=model_config['heads'], 
+            mlp_dim=model_config['mlp_dim'], 
+            masking_method=model_config['masking_method'],
+            masking_ratio=model_config['masking_ratio'], 
+            freq_masking_ratio=model_config['freq_masking_ratio'],
+            time_masking_ratio=model_config['time_masking_ratio'],
+            decoder_dim=model_config['decoder_dim'], 
+            decoder_depth=model_config['decoder_depth'],
+            channels=model_config['channels'],
+        )
+    elif model_name == 'MaskedAutoencoderViT':
+        model_config['image_size'] = ast.literal_eval(model_config['image_size'])
+        model_config['patch_size'] = ast.literal_eval(model_config['patch_size'])
+        model_config['masking_ratio'] = ast.literal_eval(model_config['masking_ratio'])
+
+        model = MaskedAutoencoderViT(
+            img_size=model_config['image_size'],
+            patch_size=model_config['patch_size'],
+            in_chans=model_config['channels'],
+            embed_dim=model_config['dim'],
+            depth=model_config['depth'],
+            num_heads=model_config['heads'],
+            decoder_embed_dim=model_config['decoder_dim'],
+            decoder_depth=model_config['decoder_depth'],
+            decoder_num_heads=model_config['decoder_heads'],
+            mlp_ratio=model_config['mlp_ratio'],
+            norm_pix_loss=False,
+            masking_method=model_config['masking_method'],
+            mask_ratio=model_config['masking_ratio'],
+        )
+
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
