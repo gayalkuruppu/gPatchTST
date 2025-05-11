@@ -16,8 +16,8 @@ data:
 model:
   seq_len: 1000
   target_dim: 1
-  patch_length: 100
-  stride: 100
+  patch_length: 1
+  stride: 1
   num_layers: 3
   d_model: 128
   num_heads: 16
@@ -58,4 +58,4 @@ train:
 neptune:
   enabled: True
   project: 'gayalkuruppu/ssl-eval'
-  experiment_name: 'tuab_normal_10_val_linear_probe_patch_100'
+  experiment_name: 'tuab_normal_10_val_linear_probe_patch_1'

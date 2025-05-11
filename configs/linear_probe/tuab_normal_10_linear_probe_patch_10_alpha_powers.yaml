@@ -49,9 +49,9 @@ model:
   checkpoint_interval: 0.05 # num_epochs or percentage
 
 train:
-  num_epochs: 20
-  learning_rate: 2e-4
-  weight_decay: 0
+  num_epochs: 100
+  learning_rate: 1e-3
+  weight_decay: 1e-3
   scheduler: 'cosine'
   val_interval_epochs: 1
 
