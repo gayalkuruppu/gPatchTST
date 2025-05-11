@@ -1,4 +1,4 @@
-from data import get_tuh_dataloaders, get_tuab_scalogram_dls
+from data import get_tuh_dataloaders, get_tuab_scalogram_dls, get_celeba_dataloaders
 
 def get_dataloaders(dataset_name, data_config, model_config):
     if dataset_name == 'tuab_timeseries':
@@ -26,6 +26,15 @@ def get_dataloaders(dataset_name, data_config, model_config):
         drop_last=data_config['drop_last'],
     )
         
+    elif dataset_name == 'celeba':
+        train_loader, val_loader, test_laoder = get_celeba_dataloaders(
+        data_config['data_path'],
+        data_config['batch_size'],
+        data_config['num_workers'],
+        prefetch_factor=data_config['prefetch_factor'],
+        pin_memory=data_config['pin_memory'],
+        drop_last=data_config['drop_last'],
+    )        
     else:
         raise ValueError(f"Unknown dataset name: {dataset_name}")
     

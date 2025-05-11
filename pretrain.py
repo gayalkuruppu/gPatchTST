@@ -1,6 +1,7 @@
 from data import get_tuh_dataloaders
+from dataloaders.dataloaders import get_dataloaders
 from configs import Config
-from get_models import get_patchTST_model
+from get_models import get_patchTST_model, get_pretrain_model
 from models.patchtst.layers.revin import RevIN
 from torch.optim import Adam
 from torch.optim.lr_scheduler import OneCycleLR
@@ -438,19 +439,8 @@ def main():
     print(f"Configuration saved to {config_backup_path}")
 
     # Create data loaders
-    train_loader, val_loader, _ = get_tuh_dataloaders(
-        data_config['root_path'],
-        data_config['data_path'],
-        data_config['csv_path'],
-        batch_size=data_config['batch_size'],
-        num_workers=data_config['num_workers'],
-        prefetch_factor=data_config['prefetch_factor'],
-        pin_memory=data_config['pin_memory'],
-        drop_last=data_config['drop_last'],
-        size=[model_config['seq_len'], 
-              model_config['target_dim'],
-              model_config['patch_length']]
-    )
+    dataset_name = data_config['dataset_name']
+    train_loader, val_loader, _ = get_dataloaders(dataset_name, data_config, model_config)
 
     train_sample = next(iter(train_loader))
     val_sample = next(iter(val_loader))
@@ -459,27 +449,8 @@ def main():
     train_num_mask_patches = int(model_config['mask_ratio']* num_patches)
     print(f"num_patches: {num_patches}, train_num_mask_patches: {train_num_mask_patches}")
     # Create model
-    model = get_patchTST_model(num_variates=data_config['n_vars'],
-                                forecast_length=data_config['pred_len'],
-                                patch_len=model_config['patch_length'],
-                                stride=model_config['stride'],
-                                num_patch=num_patches,
-                                n_layers=model_config['num_layers'],
-                                d_model=model_config['d_model'],
-                                n_heads=model_config['num_heads'],
-                                shared_embedding=model_config['shared_embedding'],
-                                d_ff=model_config['d_ff'],
-                                norm=model_config['norm'],
-                                attn_dropout=model_config['attn_dropout'],
-                                dropout=model_config['dropout'],
-                                activation=model_config['activation'],
-                                res_attention=model_config['res_attention'],
-                                pe=model_config['pe'],
-                                learn_pe=model_config['learn_pe'],
-                                head_dropout=model_config['head_dropout'],
-                                head_type=model_config['head_type'],
-                                use_cls_token=model_config['use_cls_token'],
-                            ).to(device)
+    model_name = model_config['model_name']
+    model = get_pretrain_model(model_name, model_config, data_config).to(device)
     
     # Initialize Revin
     if model_config['revin']:
