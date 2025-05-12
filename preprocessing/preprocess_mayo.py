@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from mef_utils import mef_to_mne
 from eeg_utils import map_tuh_to_standard_channels, get_standard_channel_lists
+from ec_awake_utils import find_eyes_closed_epochs_alpha_pow
 
 mne.set_log_level(verbose="ERROR")
 
@@ -308,6 +309,28 @@ def preprocess_eeg(file_path, args, channels_to_use_ref=None, channels_to_use_le
     # Step 6: Resample data
     raw = resample_data(raw, target_freq=args.resample_freq)
     
+
+
+
+
+
+
+    '''
+    EC AWAKE EPOCHS FILTER
+    '''
+    all_epochs = mne.make_fixed_length_epochs(raw, duration=10.0, preload=True)
+    ec_epochs = find_eyes_closed_epochs_alpha_pow(all_epochs)
+    if ec_epochs == []:
+        print(f"{file_path}: not enough EC epochs found!")
+        return None
+    # stack epochs into raw
+    combined_data = mne.concatenate_epochs([ec_epochs[i] for i in range(len(ec_epochs))], add_offset=False)
+    split_data = np.vsplit(combined_data.get_data(), len(combined_data))
+    full_data = np.squeeze(np.dstack(split_data), axis=0)
+    raw = mne.io.RawArray(full_data, ec_epochs.info)
+
+
+
     # Get the data array
     data = raw.get_data()
     logger.debug(f"Data shape after preprocessing: {data.shape}")
@@ -507,7 +530,7 @@ def main():
             yield (file_path, args)
 
     with tqdm(total=len(edf_files)) as pbar, \
-        concurrent.futures.ProcessPoolExecutor(max_workers=32) as executor:
+        concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
         for result in executor.map(preprocess_eeg, *zip(*_yield_args(edf_files, args))):
             if result is not None:
                 output_path, time_len = result
