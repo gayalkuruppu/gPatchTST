@@ -102,6 +102,19 @@ def get_standard_channel_lists():
         'EEG T3-REF', 'EEG C3-REF', 'EEG CZ-REF', 'EEG C4-REF', 'EEG T4-REF',
         'EEG T5-REF', 'EEG P3-REF', 'EEG PZ-REF', 'EEG P4-REF', 'EEG T6-REF', 'EEG O1-REF', 'EEG O2-REF'
     ]
+
+
+    # Also, the MCN system renames four electrodes of the 10–20 system:
+    # T3 is now T7
+    # T4 is now T8
+    # T5 is now P7
+    # T6 is now P8
+    mayo_reduced_channels = [
+        'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
+        'T7', 'C3', 'Cz', 'C4', 'T8',
+        'P7', 'P3', 'Pz', 'P4', 'P8', 'O1', 'O2'        
+    ]
+    mayo_reduced_channels = [x.lower() for x in mayo_reduced_channels]
     
     # Create mappings
     ar_ch_mapping = {ch_name: short_name for ch_name, short_name in zip(ar_ch_names, short_ch_names)}
@@ -113,7 +126,8 @@ def get_standard_channel_lists():
         'le_names': le_ch_names,
         'ar_mapping': ar_ch_mapping,
         'le_mapping': le_ch_mapping,
-        'tuh_reduced': tuh_reduced_channels
+        'tuh_reduced': tuh_reduced_channels,
+        'mayo_reduced': mayo_reduced_channels,
     }
 
 def detect_reference_system(raw):
