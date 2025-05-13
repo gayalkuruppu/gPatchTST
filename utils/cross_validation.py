@@ -6,14 +6,13 @@ from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
-
+from sklearn.linear_model import Ridge
 from sklearn.model_selection import LeaveOneOut
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import LeaveOneOut
 from sklearn.model_selection import StratifiedGroupKFold
-
+from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import RobustScaler
-
 from sklearn.pipeline import Pipeline
 
 # from sklearn.utils.parallel import Parallel, delayed
@@ -203,6 +202,90 @@ def _run_repeated_LOOCV(features, labels, clf_name, clf_hparams, adjust_sampling
     return repeats_results
 
 
+def _run_simple_KFoldCV(features, labels, subject_groups,
+                 clf_name, 
+                 cv_folds, 
+                 n_jobs,
+                 random_state
+                ):
+    
+    '''
+    CAUTION: need to input full dataset!
+    '''    
+    
+    all_fitted_gs = []
+    all_outer_fold_subject_groups = []
+    all_outer_fold_true_y = []
+    all_best_fit_pred_y_probs = []
+
+    '''
+    TODO: FIXME: parallelize outer CV loop! (for heldout set variability)
+    '''
+    # https://stackoverflow.com/questions/55174340/how-to-use-joblib-with-scikitlearn-to-crossvalidate-in-parallel
+    # out = Parallel(n_jobs=2, verbose=100, pre_dispatch='1.5*n_jobs')(delayed(train)(train_index, test_index) for train_index, test_index in skf.split(X, Y))
+
+    outer_cv = GroupKFold(n_splits=cv_folds['outer'], shuffle=True, random_state=random_state)
+    for fold_idx, (train_val_idx, heldout_test_idx) in enumerate(outer_cv.split(features, labels, subject_groups)):
+        
+        print(f"Fold {fold_idx}:")
+        
+        # print(f"  Train: index={train_index}")
+        # print(f"         subject_group={subject_groups[train_val_idx]}")
+        # print(f"  Test:  index={heldout_test_idx}")
+        # print(f"         subject_group={subject_groups[heldout_test_idx]}")
+
+        '''
+        define current outer CV fold data: features, labels, groups
+        '''
+        train_and_val_X = features[train_val_idx]
+        train_and_val_y = labels[train_val_idx]
+        
+        heldout_test_X = features[heldout_test_idx]
+        heldout_test_y = labels[heldout_test_idx]
+
+        train_and_val_subject_groups = subject_groups[train_val_idx]
+        heldout_test_subject_groups = subject_groups[heldout_test_idx]
+        
+        '''
+        define preprocessing + fixed aspects/properties of each model type (ones that are NOT to be tuned)
+        '''
+        
+        scaler = RobustScaler(with_centering=True, with_scaling=True, quantile_range=(5.0, 95.0), unit_variance=False)
+        # scaler = StandardScaler(with_mean=True, with_std=True)
+        
+        if clf_name == 'GaussianNB':
+            clf = GaussianNB(priors=None, var_smoothing=1e-09)
+        elif clf_name == 'SVM':
+            clf = SVC(class_weight='balanced', probability=True)
+        elif clf_name == 'LogReg':
+            clf = LogisticRegression(solver='saga', penalty='elasticnet', class_weight='balanced', dual=False, n_jobs=n_jobs["model_fit"])
+        elif clf_name == 'kNN':
+            clf = KNeighborsClassifier(algorithm='auto', metric='minkowski', metric_params=None, n_jobs=n_jobs["model_fit"])
+        elif clf_name == 'LinReg_L2':
+            clf = Ridge(alpha=1.0, fit_intercept=True, copy_X=True, max_iter=100, tol=0.0001, solver='auto', positive=False)
+        else:
+            raise ValueError("unknown clf type!")
+       
+        '''
+        run kfold gridsearch hyperparam sweep using train_and_val of current outer cv fold
+        NOTE: each hparam will be applied to inner k folds of the train+val data! 
+        '''
+        pipe = Pipeline([('scaler', scaler), (clf_name, clf)])
+        fit_model = pipe.fit(train_and_val_X, train_and_val_y)
+        all_fitted_gs.append(deepcopy(fit_model))
+        all_outer_fold_subject_groups.append(heldout_test_subject_groups)
+        all_outer_fold_true_y.append(heldout_test_y)
+        '''
+        CAUTION: y_probs == y_pred for LinRegression!
+        '''
+        if clf_name == 'LinReg_L2':
+            all_best_fit_pred_y_probs.append(fit_model.predict(heldout_test_X))
+        else:
+            all_best_fit_pred_y_probs.append(fit_model.predict_proba(heldout_test_X)[:,1])
+
+    simple_cv_results = [all_fitted_gs, all_outer_fold_subject_groups, all_outer_fold_true_y, all_best_fit_pred_y_probs]
+    return simple_cv_results
+
 
 def run_CV(features, labels, groups, cv_type, cv_params, clf_name):
     
@@ -230,7 +313,20 @@ def run_CV(features, labels, groups, cv_type, cv_params, clf_name):
                                     )
         return nested_cv_results
 
+
+    elif cv_type == "Simple_KFold":
+        '''
+        KFold (outer cv) for train+val and heldout splits
+        '''
+        simple_cv_results = _run_simple_KFoldCV(features, labels, groups,
+                                     clf_name, 
+                                     cv_folds=cv_params["cv_folds"],
+                                     n_jobs=cv_params["n_jobs"],
+                                     random_state=cv_params["random_state"]
+                            )
+        return simple_cv_results
+
     else: 
-        raise ValueError("TODO: unknown cv type!")
+        raise ValueError("FIXME: unknown cv type!")
 
 

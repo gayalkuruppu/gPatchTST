@@ -1,5 +1,5 @@
 from utils.cross_validation import run_CV
-from utils.metrics import get_metrics
+from utils.metrics import get_metrics, get_regression_metrics
 from utils.plotting import plot_ROC_curves
 import numpy as np
 
@@ -26,7 +26,7 @@ def regression_pipeline_runner(
     compute regression metrics
     '''
     _, all_outer_fold_subject_groups, all_outer_fold_true_y, all_best_fit_pred_y_probs = full_cv_results
-    model_metrics_across_folds = get_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
+    model_metrics_across_folds = get_regression_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
                                              all_outer_fold_subject_groups, cv_params, model_type)
     
     all_results = {
