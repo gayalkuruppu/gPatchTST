@@ -1,5 +1,5 @@
 from utils.cross_validation import run_CV
-from utils.metrics import get_metrics, get_regression_metrics
+from utils.metrics import get_binary_clf_metrics, get_regression_metrics, get_multiclass_clf_metrics
 from utils.plotting import plot_ROC_curves
 import numpy as np
 
@@ -29,10 +29,10 @@ def multiclass_clf_pipeline_runner(
     )
 
     '''
-    compute classification metrics
+    compute multi-class classification metrics
     '''
     _, all_outer_fold_subject_groups, all_outer_fold_true_y, all_best_fit_pred_y_probs = full_cv_results
-    model_metrics_across_folds = get_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
+    model_metrics_across_folds = get_multiclass_clf_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
                                              all_outer_fold_subject_groups, cv_params, model_type)
     
     all_results = {
@@ -45,6 +45,8 @@ def multiclass_clf_pipeline_runner(
     }
 
     return all_results
+
+
 
 def regression_pipeline_runner(
     X, y, groups, 
@@ -90,8 +92,8 @@ def clf_pipeline_runner(
     model_type,
     cv_type,
     cv_params,
-    return_plot=False,
-    suptitle="",
+    # return_plot=False,
+    # suptitle="",
     ):
 
     '''
@@ -116,7 +118,7 @@ def clf_pipeline_runner(
     compute classification metrics
     '''
     _, all_outer_fold_subject_groups, all_outer_fold_true_y, all_best_fit_pred_y_probs = full_cv_results
-    model_metrics_across_folds = get_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
+    model_metrics_across_folds = get_binary_clf_metrics(all_outer_fold_true_y, all_best_fit_pred_y_probs, 
                                              all_outer_fold_subject_groups, cv_params, model_type)
     
     all_results = {
@@ -128,19 +130,21 @@ def clf_pipeline_runner(
         }
     }
 
-    if return_plot == False:
-        return all_results
+    return all_results
 
-    else:
-        '''
-        make and return ROC plot
-        '''
-        fig, ax = plot_ROC_curves(
-            all_results, 
-            # plot_title=f"SUBJECT-LEVEL\nStrat{cv_params['cv_folds']['outer']}FoldCV + NestedHparamGridSearch \
-            # (Strat{cv_params['cv_folds']['inner']}FoldCV)\n??(N=??) vs. ??(N=??)", 
-            plot_title=f"N: {_counts}",
-            metric_type="subject_level",
-            suptitle=suptitle,
-        )
-        return fig, ax
+    # if return_plot == False:
+    #     return all_results
+
+    # else:
+    #     '''
+    #     make and return ROC plot
+    #     '''
+    #     fig, ax = plot_ROC_curves(
+    #         all_results, 
+    #         # plot_title=f"SUBJECT-LEVEL\nStrat{cv_params['cv_folds']['outer']}FoldCV + NestedHparamGridSearch \
+    #         # (Strat{cv_params['cv_folds']['inner']}FoldCV)\n??(N=??) vs. ??(N=??)", 
+    #         plot_title=f"N: {_counts}",
+    #         metric_type="subject_level",
+    #         suptitle=suptitle,
+    #     )
+    #     return fig, ax

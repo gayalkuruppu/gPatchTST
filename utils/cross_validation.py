@@ -259,12 +259,14 @@ def _run_simple_KFoldCV(features, labels, subject_groups,
             clf = SVC(class_weight='balanced', probability=True)
         elif clf_name == 'LogReg':
             clf = LogisticRegression(solver='saga', penalty='elasticnet', class_weight='balanced', dual=False, n_jobs=n_jobs["model_fit"])
+        elif clf_name == 'LogReg_L2':
+            clf = LogisticRegression(solver='lbfgs', penalty='l2', class_weight='balanced', dual=False, n_jobs=n_jobs["model_fit"])
         elif clf_name == 'kNN':
             clf = KNeighborsClassifier(algorithm='auto', metric='minkowski', metric_params=None, n_jobs=n_jobs["model_fit"])
         elif clf_name == 'LinReg_L2':
             clf = Ridge(alpha=1.0, fit_intercept=True, copy_X=True, max_iter=100, tol=0.0001, solver='auto', positive=False)
-        elif clf_name == 'LogReg_MultiClass':
-            clf = LogisticRegression(solver='saga', penalty='elasticnet', class_weight='balanced', dual=False, n_jobs=n_jobs["model_fit"])
+        elif clf_name == 'LogReg_L2_MultiClass':
+            clf = LogisticRegression(solver='lbfgs', penalty='l2', class_weight='balanced', dual=False, multi_class='auto', n_jobs=n_jobs["model_fit"])
         else:
             raise ValueError("unknown clf type!")
        
@@ -277,10 +279,15 @@ def _run_simple_KFoldCV(features, labels, subject_groups,
         all_fitted_gs.append(deepcopy(fit_model))
         all_outer_fold_subject_groups.append(heldout_test_subject_groups)
         all_outer_fold_true_y.append(heldout_test_y)
-        '''
-        CAUTION: y_probs == y_pred for LinRegression!
-        '''
         if clf_name == 'LinReg_L2':
+            '''
+            CAUTION: y_probs == y_pred for LinRegression!
+            '''
+            all_best_fit_pred_y_probs.append(fit_model.predict(heldout_test_X))
+        elif clf_name == 'LogReg_L2_MultiClass':
+            '''
+            CAUTION: y_probs == y_pred for MultiClass LogReg!
+            '''
             all_best_fit_pred_y_probs.append(fit_model.predict(heldout_test_X))
         else:
             all_best_fit_pred_y_probs.append(fit_model.predict_proba(heldout_test_X)[:,1])
@@ -319,6 +326,7 @@ def run_CV(features, labels, groups, cv_type, cv_params, clf_name):
     elif cv_type == "Simple_KFold":
         '''
         KFold (outer cv) for train+val and heldout splits
+        groups == subject_groups
         '''
         simple_cv_results = _run_simple_KFoldCV(features, labels, groups,
                                      clf_name, 
