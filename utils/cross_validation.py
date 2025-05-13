@@ -263,6 +263,8 @@ def _run_simple_KFoldCV(features, labels, subject_groups,
             clf = KNeighborsClassifier(algorithm='auto', metric='minkowski', metric_params=None, n_jobs=n_jobs["model_fit"])
         elif clf_name == 'LinReg_L2':
             clf = Ridge(alpha=1.0, fit_intercept=True, copy_X=True, max_iter=100, tol=0.0001, solver='auto', positive=False)
+        elif clf_name == 'LogReg_MultiClass':
+            clf = LogisticRegression(solver='saga', penalty='elasticnet', class_weight='balanced', dual=False, n_jobs=n_jobs["model_fit"])
         else:
             raise ValueError("unknown clf type!")
        
