@@ -2,6 +2,7 @@ pretrained_models/
 logs/
 *.csv
 preprocessed_eeg_data/
+*.log
 
 # Environment files
 
